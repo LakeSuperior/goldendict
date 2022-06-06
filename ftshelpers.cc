@@ -219,9 +219,9 @@ bool parseSearchString( QString const & str, QStringList & indexWords,
   return true;
 }
 
-Mutex _mapLock;
 void parseArticleForFts( uint32_t articleAddress, QString & articleText,
                          QMap< QString, QVector< uint32_t > > & words,
+                         Mutex & _mapLock,
                          bool handleRoundBrackets )
 {
   if( articleText.isEmpty() )
@@ -383,19 +383,6 @@ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancell
     needHandleBrackets = name.endsWith( ".dsl" ) || name.endsWith( "dsl.dz" );
   }
 
-  // index articles for full-text search
-  // for( int i = 0; i < offsets.size(); i++ )
-  // {
-  //   if( Utils::AtomicInt::loadAcquire( isCancelled ) )
-  //     throw exUserAbort();
-  //
-  //   QString headword, articleStr;
-  //
-  //   dict->getArticleText( offsets.at( i ), headword, articleStr );
-  //
-  //   parseArticleForFts( offsets.at( i ), articleStr, ftsWords, needHandleBrackets );
-  // }
-
   QtConcurrent::blockingMap( offsets,
                              [ & ]( auto address ) {
                                if( Utils::AtomicInt::loadAcquire( isCancelled ) )
@@ -405,7 +392,10 @@ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancell
 
                                dict->getArticleText( address, headword, articleStr );
 
-                               parseArticleForFts( address, articleStr, ftsWords, needHandleBrackets );
+                               parseArticleForFts( address,
+                                                   articleStr,
+                                                   ftsWords,
+                                                   dict->getMapMutex() ,needHandleBrackets );
   
                              } );
 
