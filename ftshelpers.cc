@@ -219,6 +219,7 @@ bool parseSearchString( QString const & str, QStringList & indexWords,
   return true;
 }
 
+Mutex _mapLock;
 void parseArticleForFts( uint32_t articleAddress, QString & articleText,
                          QMap< QString, QVector< uint32_t > > & words,
                          bool handleRoundBrackets )
@@ -260,6 +261,7 @@ void parseArticleForFts( uint32_t articleAddress, QString & articleText,
         if( !setOfWords.contains( hieroglyph ) )
         {
           setOfWords.insert( hieroglyph );
+          Mutex::Lock _( _mapLock );
           words[ hieroglyph ].push_back( articleAddress );
         }
 
@@ -309,6 +311,7 @@ void parseArticleForFts( uint32_t articleAddress, QString & articleText,
           if( !setOfWords.contains( *it ) )
           {
             setOfWords.insert( *it );
+            Mutex::Lock _( _mapLock );
             words[ *it ].push_back( articleAddress );
           }
         }
@@ -317,6 +320,7 @@ void parseArticleForFts( uint32_t articleAddress, QString & articleText,
       if( !setOfWords.contains( word ) )
       {
         setOfWords.insert( word );
+        Mutex::Lock _( _mapLock );
         words[ word ].push_back( articleAddress );
       }
     }
@@ -380,17 +384,30 @@ void makeFTSIndex( BtreeIndexing::BtreeDictionary * dict, QAtomicInt & isCancell
   }
 
   // index articles for full-text search
-  for( int i = 0; i < offsets.size(); i++ )
-  {
-    if( Utils::AtomicInt::loadAcquire( isCancelled ) )
-      throw exUserAbort();
+  // for( int i = 0; i < offsets.size(); i++ )
+  // {
+  //   if( Utils::AtomicInt::loadAcquire( isCancelled ) )
+  //     throw exUserAbort();
+  //
+  //   QString headword, articleStr;
+  //
+  //   dict->getArticleText( offsets.at( i ), headword, articleStr );
+  //
+  //   parseArticleForFts( offsets.at( i ), articleStr, ftsWords, needHandleBrackets );
+  // }
 
-    QString headword, articleStr;
+  QtConcurrent::blockingMap( offsets,
+                             [ & ]( auto address ) {
+                               if( Utils::AtomicInt::loadAcquire( isCancelled ) )
+                                 throw exUserAbort();
 
-    dict->getArticleText( offsets.at( i ), headword, articleStr );
+                               QString headword, articleStr;
 
-    parseArticleForFts( offsets.at( i ), articleStr, ftsWords, needHandleBrackets );
-  }
+                               dict->getArticleText( address, headword, articleStr );
+
+                               parseArticleForFts( address, articleStr, ftsWords, needHandleBrackets );
+  
+                             } );
 
   // Free memory
   offsets.clear();
@@ -775,12 +792,12 @@ void FTSResultsRequest::combinedIndexSearch( BtreeIndexing::BtreeIndex & ftsInde
           linksPtr = chunks->getBlock( links[ x ].articleOffset, chunk );
         }
 
-        memcpy( &size, linksPtr, sizeof(uint32_t) );
-        linksPtr += sizeof(uint32_t);
+        memcpy( &size, linksPtr, sizeof( uint32_t ) );
+        linksPtr += sizeof( uint32_t );
         for( uint32_t y = 0; y < size; y++ )
         {
           tmp.insert( *( reinterpret_cast< uint32_t * >( linksPtr ) ) );
-          linksPtr += sizeof(uint32_t);
+          linksPtr += sizeof( uint32_t );
         }
       }
 
