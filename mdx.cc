@@ -900,7 +900,7 @@ void MdxDictionary::loadIcon() noexcept
 void MdxDictionary::loadArticle( uint32_t offset, string & articleText, bool noFilter )
 {
   vector< char > chunk;
-  Mutex::Lock _( idxMutex );
+  // Mutex::Lock _( idxMutex );
 
   // Load record info from index
   MdictParser::RecordInfo recordInfo;
