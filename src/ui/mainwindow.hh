@@ -1,8 +1,7 @@
 /* This file is (c) 2008-2012 Konstantin Isakov <ikm@goldendict.org>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef __MAINWINDOW_HH_INCLUDED__
-#define __MAINWINDOW_HH_INCLUDED__
+#pragma once
 
 #include <QMainWindow>
 #include <QThread>
@@ -15,7 +14,7 @@
 #include "config.hh"
 #include "dict/dictionary.hh"
 #include "article_netmgr.hh"
-#include "audioplayerfactory.hh"
+#include "audio/audioplayerfactory.hh"
 #include "instances.hh"
 #include "article_maker.hh"
 #include "scanpopup.hh"
@@ -29,7 +28,6 @@
 #include "dictheadwords.hh"
 #include "fulltextsearch.hh"
 #include "base_type.hh"
-
 #include "hotkeywrapper.hh"
 #include "resourceschemehandler.hh"
 #include "iframeschemehandler.hh"
@@ -40,11 +38,13 @@
 #if defined( Q_OS_MAC )
   #include "macos/gd_clipboard.hh"
 #endif
+//must place the qactiongroup after fixx11h.h, None in QActionGroup conflict with X.h's macro None.
+#include <QActionGroup>
 
 using std::string;
 using std::vector;
 
-class MainWindow: public QMainWindow, public DataCommitter
+class MainWindow: public QMainWindow
 {
   Q_OBJECT
 
@@ -53,7 +53,6 @@ public:
   MainWindow( Config::Class & cfg );
   ~MainWindow();
 
-  virtual void commitData( QSessionManager & );
 
   /// Set group for main/popup window
   void setGroupByName( QString const & name, bool main_window );
@@ -67,8 +66,9 @@ public slots:
   void messageFromAnotherInstanceReceived( QString const & );
   void showStatusBarMessage( QString const &, int, QPixmap const & );
   void wordReceived( QString const & );
-  void headwordReceived( QString const &, QString const & );
   void headwordFromFavorites( QString const &, QString const & );
+  /// Save config and states...
+  void commitData();
   void quitApp();
 
 private:
@@ -77,7 +77,6 @@ private:
   void addGroupComboBoxActionsToDialog( QDialog * dialog, GroupComboBox * pGroupComboBox );
   void removeGroupComboBoxActionsFromDialog( QDialog * dialog, GroupComboBox * pGroupComboBox );
 
-  void commitData();
 
   QSystemTrayIcon * trayIcon;
 
@@ -106,9 +105,12 @@ private:
   QFont wordListDefaultFont, translateLineDefaultFont, groupListDefaultFont;
 
   QAction escAction, focusTranslateLineAction, addTabAction, closeCurrentTabAction, closeAllTabAction,
-    closeRestTabAction, switchToNextTabAction, switchToPrevTabAction, showDictBarNamesAction,
-    useSmallIconsInToolbarsAction, toggleMenuBarAction, focusHeadwordsDlgAction, focusArticleViewAction,
-    addAllTabToFavoritesAction;
+    closeRestTabAction, switchToNextTabAction, switchToPrevTabAction, showDictBarNamesAction, toggleMenuBarAction,
+    focusHeadwordsDlgAction, focusArticleViewAction, addAllTabToFavoritesAction;
+
+  QAction useSmallIconsInToolbarsAction, useLargeIconsInToolbarsAction, useNormalIconsInToolbarsAction;
+
+  QActionGroup * smallLargeIconGroup = new QActionGroup( this );
 
   QAction stopAudioAction;
   QToolBar * navToolbar;
@@ -186,7 +188,7 @@ private:
   /// Applies Qt stylesheets, use Windows dark palette etc....
   void updateAppearances( const QString & addonStyle,
                           const QString & displayStyle,
-                          const bool & darkMode
+                          Config::Dark darkMode
 #if !defined( Q_OS_WIN )
                           ,
                           const QString & interfaceStyle
@@ -195,7 +197,7 @@ private:
 
   /// Creates, destroys or otherwise updates tray icon, according to the
   /// current configuration and situation.
-  void updateTrayIcon();
+  void trayIconUpdateOrInit();
 
   void wheelEvent( QWheelEvent * );
   void closeEvent( QCloseEvent * );
@@ -204,7 +206,7 @@ private:
   void setupNetworkCache( int maxSize );
   void makeDictionaries();
   void updateStatusLine();
-  void updateGroupList();
+  void updateGroupList( bool reload = true );
   void updateDictionaryBar();
 
   void updatePronounceAvailability();
@@ -223,9 +225,8 @@ private:
   /// group, or to all dictionaries if there are no groups.
   vector< sptr< Dictionary::Class > > const & getActiveDicts();
 
-  /// Brings the main window to front if it's not currently, or hides it
-  /// otherwise. The hiding part is omitted if onlyShow is true.
-  void toggleMainWindow( bool onlyShow = false );
+  /// @param ensureShow only ensure the window will be shown and no "toggling"
+  void toggleMainWindow( bool ensureShow );
 
   /// Creates hotkeyWrapper and hooks the currently set keys for it
   void installHotKeys();
@@ -235,8 +236,6 @@ private:
 
   void mousePressEvent( QMouseEvent * event );
 
-  void updateCurrentGroupProperty();
-
 
   /// Handles backward and forward mouse buttons and
   /// returns true if the event is handled.
@@ -245,11 +244,12 @@ private:
   ArticleView * getCurrentArticleView();
   void ctrlTabPressed();
 
-  void fillWordListFromHistory();
-
   QString unescapeTabHeader( QString const & header );
 
-  void respondToTranslationRequest( QString const & word, bool checkModifiers, QString const & scrollTo = QString() );
+  void respondToTranslationRequest( QString const & word,
+                                    bool checkModifiers,
+                                    QString const & scrollTo = QString(),
+                                    bool focus               = true );
 
   void updateSuggestionList();
   void updateSuggestionList( QString const & text );
@@ -288,8 +288,6 @@ private slots:
   void showDictionaryHeadwords( Dictionary::Class * dict );
 
   void openDictionaryFolder( QString const & id );
-
-  void editDictionary( Dictionary::Class * dict );
 
   void showFTSIndexingName( QString const & name );
 
@@ -344,7 +342,7 @@ private slots:
 
   /// If editDictionaryGroup is specified, the dialog positions on that group
   /// initially.
-  void editDictionaries( unsigned editDictionaryGroup = Instances::Group::NoGroupId );
+  void editDictionaries( unsigned editDictionaryGroup = GroupId::NoGroupId );
   /// Edits current group when triggered from the dictionary bar.
   void editCurrentGroup();
   void editPreferences();
@@ -389,7 +387,7 @@ private slots:
 
   void showTranslationForDicts( QString const &,
                                 QStringList const & dictIDs,
-                                QRegExp const & searchRegExp,
+                                QRegularExpression const & searchRegExp,
                                 bool ignoreDiacritics );
 
   void showHistoryItem( QString const & );
@@ -398,15 +396,13 @@ private slots:
 
   void setAutostart( bool );
 
-  void showMainWindow();
-
   void visitHomepage();
   void visitForum();
   void openConfigFolder();
   void showAbout();
 
   void showDictBarNamesTriggered();
-  void useSmallIconsInToolbarsTriggered();
+  void iconSizeActionTriggered( QAction * action );
   void toggleMenuBarTriggered( bool announce = true );
 
   void on_clearHistory_triggered();
@@ -504,5 +500,3 @@ public slots:
     setValue( progress );
   }
 };
-
-#endif

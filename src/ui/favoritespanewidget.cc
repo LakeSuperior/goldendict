@@ -9,13 +9,17 @@
 #include <QMessageBox>
 #include <QtAlgorithms>
 #include <QMap>
+#include <QSaveFile>
+#include <QStringBuilder>
+#include <QDebug>
+
 #include <algorithm>
 #include <functional>
 
 #include "favoritespanewidget.hh"
-#include "gddebug.hh"
-#include "atomic_rename.hh"
 #include "globalbroadcaster.hh"
+
+#include <QFile>
 
 /************************************************** FavoritesPaneWidget *********************************************/
 
@@ -53,8 +57,9 @@ void FavoritesPaneWidget::setUp( Config::Class * cfg, QMenu * menu )
   m_favoritesMenu = new QMenu( this );
   m_separator     = m_favoritesMenu->addSeparator();
   QListIterator< QAction * > actionsIter( menu->actions() );
-  while ( actionsIter.hasNext() )
+  while ( actionsIter.hasNext() ) {
     m_favoritesMenu->addAction( actionsIter.next() );
+  }
 
   // Make the favorites pane's titlebar
 
@@ -81,8 +86,9 @@ void FavoritesPaneWidget::setUp( Config::Class * cfg, QMenu * menu )
 
   QAbstractItemModel * oldModel = m_favoritesTree->model();
   m_favoritesTree->setModel( m_favoritesModel );
-  if ( oldModel )
+  if ( oldModel ) {
     oldModel->deleteLater();
+  }
 
   connect( m_favoritesTree, &QTreeView::expanded, m_favoritesModel, &FavoritesModel::itemExpanded );
 
@@ -120,8 +126,9 @@ void FavoritesPaneWidget::setUp( Config::Class * cfg, QMenu * menu )
 
 FavoritesPaneWidget::~FavoritesPaneWidget()
 {
-  if ( listItemDelegate )
+  if ( listItemDelegate ) {
     delete listItemDelegate;
+  }
 }
 
 bool FavoritesPaneWidget::eventFilter( QObject * obj, QEvent * ev )
@@ -160,8 +167,9 @@ void FavoritesPaneWidget::deleteSelectedItems()
                     tr( "All selected items will be deleted. Continue?" ),
                     QMessageBox::Yes | QMessageBox::No );
     mb.exec();
-    if ( mb.result() != QMessageBox::Yes )
+    if ( mb.result() != QMessageBox::Yes ) {
       return;
+    }
   }
 
   m_favoritesModel->removeItemsForIndexes( selectedIdxs );
@@ -194,8 +202,9 @@ void FavoritesPaneWidget::onSelectionChanged( const QItemSelection & selection, 
 {
   Q_UNUSED( deselected )
 
-  if ( m_favoritesTree->selectionModel()->selectedIndexes().size() != 1 || selection.indexes().isEmpty() )
+  if ( m_favoritesTree->selectionModel()->selectedIndexes().size() != 1 || selection.indexes().isEmpty() ) {
     return;
+  }
 
   itemSelectionChanged = true;
   emitFavoritesItemRequested( selection.indexes().front() );
@@ -219,24 +228,29 @@ void FavoritesPaneWidget::emitFavoritesItemRequested( QModelIndex const & idx )
   QString headword = m_favoritesModel->data( idx, Qt::DisplayRole ).toString();
   QString path     = m_favoritesModel->pathToItem( idx );
 
-  if ( !headword.isEmpty() )
+  if ( !headword.isEmpty() ) {
     emit favoritesItemRequested( headword, path );
+  }
 }
 
 void FavoritesPaneWidget::addFolder()
 {
   QModelIndexList selectedIdx = m_favoritesTree->selectionModel()->selectedIndexes();
-  if ( selectedIdx.size() > 1 )
+  if ( selectedIdx.size() > 1 ) {
     return;
+  }
 
   QModelIndex folderIdx;
-  if ( selectedIdx.size() )
+  if ( selectedIdx.size() ) {
     folderIdx = m_favoritesModel->addNewFolder( selectedIdx.front() );
-  else
+  }
+  else {
     folderIdx = m_favoritesModel->addNewFolder( QModelIndex() );
+  }
 
-  if ( folderIdx.isValid() )
+  if ( folderIdx.isValid() ) {
     m_favoritesTree->edit( folderIdx );
+  }
 }
 
 void FavoritesPaneWidget::addHeadword( QString const & path, QString const & headword )
@@ -322,8 +336,9 @@ void TreeItem::appendChild( TreeItem * item )
 
 void TreeItem::insertChild( int row, TreeItem * item )
 {
-  if ( row > childItems.count() )
+  if ( row > childItems.count() ) {
     row = childItems.count();
+  }
   childItems.insert( row, item );
 }
 
@@ -334,8 +349,9 @@ TreeItem * TreeItem::child( int row ) const
 
 void TreeItem::deleteChild( int row )
 {
-  if ( row < 0 || row >= childItems.count() )
+  if ( row < 0 || row >= childItems.count() ) {
     return;
+  }
 
   TreeItem * it = childItems.at( row );
   childItems.removeAt( row );
@@ -359,8 +375,9 @@ void TreeItem::setData( const QVariant & newData )
 
 int TreeItem::row() const
 {
-  if ( parentItem )
+  if ( parentItem ) {
     return parentItem->childItems.indexOf( const_cast< TreeItem * >( this ) );
+  }
 
   return 0;
 }
@@ -373,10 +390,12 @@ TreeItem * TreeItem::parent()
 Qt::ItemFlags TreeItem::flags() const
 {
   Qt::ItemFlags f = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
-  if ( m_type == Folder )
+  if ( m_type == Folder ) {
     f |= Qt::ItemIsEditable | Qt::ItemIsDropEnabled;
-  else if ( m_type == Root )
+  }
+  else if ( m_type == Root ) {
     f |= Qt::ItemIsDropEnabled;
+  }
 
   return f;
 }
@@ -387,8 +406,9 @@ QString TreeItem::fullPath() const
   QString path;
   TreeItem * par = parentItem;
   for ( ;; ) {
-    if ( !par )
+    if ( !par ) {
       break;
+    }
     path = par->data().toString() + "/" + path;
     par  = par->parentItem;
   }
@@ -400,8 +420,9 @@ TreeItem * TreeItem::duplicateItem( TreeItem * newParent ) const
   TreeItem * newItem = new TreeItem( itemData, newParent, m_type );
   if ( m_type == Folder ) {
     QList< TreeItem * >::const_iterator it = childItems.begin();
-    for ( ; it != childItems.end(); ++it )
+    for ( ; it != childItems.end(); ++it ) {
       newItem->appendChild( ( *it )->duplicateItem( newItem ) );
+    }
   }
   return newItem;
 }
@@ -410,10 +431,12 @@ bool TreeItem::haveAncestor( TreeItem * item )
 {
   TreeItem * par = parentItem;
   for ( ;; ) {
-    if ( !par )
+    if ( !par ) {
       break;
-    if ( par == item )
+    }
+    if ( par == item ) {
       return true;
+    }
     par = par->parent();
   }
   return false;
@@ -424,10 +447,12 @@ bool TreeItem::haveSameItem( TreeItem * item, bool allowSelf )
   QList< TreeItem * >::const_iterator it = childItems.begin();
   QString name                           = item->data().toString();
   for ( ; it != childItems.end(); ++it ) {
-    if ( *it == item && !allowSelf )
+    if ( *it == item && !allowSelf ) {
       return true;
-    if ( ( *it )->data().toString() == name && ( *it )->type() == item->type() && ( *it ) != item )
+    }
+    if ( ( *it )->data().toString() == name && ( *it )->type() == item->type() && ( *it ) != item ) {
       return true;
+    }
   }
 
   return false;
@@ -465,8 +490,9 @@ FavoritesModel::FavoritesModel( QString favoritesFilename, QObject * parent ):
 
 FavoritesModel::~FavoritesModel()
 {
-  if ( rootItem )
+  if ( rootItem ) {
     delete rootItem;
+  }
 }
 
 Qt::ItemFlags FavoritesModel::flags( const QModelIndex & idx ) const
@@ -488,33 +514,38 @@ QModelIndex FavoritesModel::index( int row, int column, const QModelIndex & pare
   TreeItem * parentItem = getItem( parentIdx );
 
   TreeItem * childItem = parentItem->child( row );
-  if ( childItem )
+  if ( childItem ) {
     return createIndex( row, column, childItem );
+  }
 
   return QModelIndex();
 }
 
 QModelIndex FavoritesModel::parent( const QModelIndex & index ) const
 {
-  if ( !index.isValid() )
+  if ( !index.isValid() ) {
     return QModelIndex();
+  }
 
   TreeItem * childItem = getItem( index );
-  if ( childItem == rootItem )
+  if ( childItem == rootItem ) {
     return QModelIndex();
+  }
 
   TreeItem * parentItem = childItem->parent();
 
-  if ( parentItem == rootItem )
+  if ( parentItem == rootItem ) {
     return QModelIndex();
+  }
 
   return createIndex( parentItem->row(), 0, parentItem );
 }
 
 int FavoritesModel::rowCount( const QModelIndex & parent ) const
 {
-  if ( parent.column() > 0 )
+  if ( parent.column() > 0 ) {
     return 0;
+  }
 
   TreeItem * parentItem = getItem( parent );
 
@@ -532,8 +563,9 @@ bool FavoritesModel::removeRows( int row, int count, const QModelIndex & parent 
 
   beginRemoveRows( parent, row, row + count - 1 );
 
-  for ( int i = 0; i < count; i++ )
+  for ( int i = 0; i < count; i++ ) {
     parentItem->deleteChild( row );
+  }
 
   endRemoveRows();
 
@@ -544,8 +576,9 @@ bool FavoritesModel::removeRows( int row, int count, const QModelIndex & parent 
 
 bool FavoritesModel::setData( const QModelIndex & index, const QVariant & value, int role )
 {
-  if ( role != Qt::EditRole || !index.isValid() || value.toString().isEmpty() )
+  if ( role != Qt::EditRole || !index.isValid() || value.toString().isEmpty() ) {
     return false;
+  }
 
   QModelIndex parentIdx = parent( index );
   if ( findItemInFolder( value.toString(), TreeItem::Folder, parentIdx ).isValid() ) {
@@ -563,25 +596,29 @@ bool FavoritesModel::setData( const QModelIndex & index, const QVariant & value,
 
 QVariant FavoritesModel::data( QModelIndex const & index, int role ) const
 {
-  if ( !index.isValid() )
+  if ( !index.isValid() ) {
     return QVariant();
+  }
 
   TreeItem * item = getItem( index );
-  if ( item == rootItem )
+  if ( item == rootItem ) {
     return QVariant();
+  }
 
   if ( role == Qt::DisplayRole || role == Qt::ToolTipRole ) {
     return item->data();
   }
   else if ( role == Qt::DecorationRole ) {
-    if ( item->type() == TreeItem::Folder || item->type() == TreeItem::Root )
+    if ( item->type() == TreeItem::Folder || item->type() == TreeItem::Root ) {
       return QIcon( ":/icons/folder.svg" );
+    }
 
     return QVariant();
   }
   if ( role == Qt::EditRole ) {
-    if ( item->type() == TreeItem::Folder )
+    if ( item->type() == TreeItem::Folder ) {
       return item->data();
+    }
 
     return QVariant();
   }
@@ -600,14 +637,15 @@ void FavoritesModel::readData()
 
   beginResetModel();
 
-  if ( rootItem )
+  if ( rootItem ) {
     delete rootItem;
+  }
 
   rootItem = new TreeItem( QVariant(), 0, TreeItem::Root );
 
   QFile favoritesFile( m_favoritesFilename );
   if ( !favoritesFile.open( QFile::ReadOnly ) ) {
-    gdDebug( "No favorites file found" );
+    qDebug( "No favorites file found" );
     return;
   }
 
@@ -617,17 +655,21 @@ void FavoritesModel::readData()
 
   if ( !dom.setContent( &favoritesFile, false, &errorStr, &errorLine, &errorColumn ) ) {
     // Mailformed file
-    gdWarning( "Favorites file parsing error: %s at %d,%d\n", errorStr.toUtf8().data(), errorLine, errorColumn );
+    qWarning( "Favorites file parsing error: %s at %d,%d", errorStr.toUtf8().data(), errorLine, errorColumn );
 
     QMessageBox mb( QMessageBox::Warning, "GoldenDict", tr( "Error in favorities file" ), QMessageBox::Ok );
     mb.exec();
 
     dom.clear();
     favoritesFile.close();
-    renameAtomically( m_favoritesFilename, m_favoritesFilename + ".bak" );
+    QFile::rename( m_favoritesFilename,
+                   m_favoritesFilename % QStringLiteral( "." )
+                     % QDateTime::currentDateTime().toString( QStringLiteral( "yyyyMMdd_HHmmss" ) )
+                     % QStringLiteral( ".bad" ) );
   }
-  else
+  else {
     favoritesFile.close();
+  }
 
   QDomNode rootNode = dom.documentElement();
   addFolder( rootItem, rootNode );
@@ -639,12 +681,13 @@ void FavoritesModel::readData()
 
 void FavoritesModel::saveData()
 {
-  if ( !dirty )
+  if ( !dirty ) {
     return;
+  }
 
-  QFile tmpFile( m_favoritesFilename + ".tmp" );
+  QSaveFile tmpFile( m_favoritesFilename );
   if ( !tmpFile.open( QFile::WriteOnly ) ) {
-    gdWarning( "Can't write favorites file, error: %s", tmpFile.errorString().toUtf8().data() );
+    qWarning( "Can't write favorites file, error: %s", tmpFile.errorString().toUtf8().data() );
     return;
   }
 
@@ -657,15 +700,16 @@ void FavoritesModel::saveData()
   QByteArray result( dom.toByteArray() );
 
   if ( tmpFile.write( result ) != result.size() ) {
-    gdWarning( "Can't write favorites file, error: %s", tmpFile.errorString().toUtf8().data() );
+    qWarning( "Can't write favorites file, error: %s", tmpFile.errorString().toUtf8().data() );
     return;
   }
 
-  tmpFile.close();
-
-  if ( renameAtomically( tmpFile.fileName(), m_favoritesFilename ) )
+  if ( tmpFile.commit() ) {
     dirty = false;
-
+  }
+  else {
+    qDebug() << "Failed to save favorite file";
+  }
   dom.clear();
 }
 
@@ -770,14 +814,16 @@ bool FavoritesModel::dropMimeData(
       if ( mimeData ) {
         QModelIndexList const & list = mimeData->getIndexesList();
 
-        if ( list.isEmpty() )
+        if ( list.isEmpty() ) {
           return false;
+        }
 
         TreeItem * parentItem = getItem( par );
         QModelIndex parentIdx = par;
 
-        if ( row < 0 )
+        if ( row < 0 ) {
           row = 0;
+        }
 
         QList< QModelIndex >::const_iterator it = list.begin();
         QList< TreeItem * > movedItems;
@@ -785,8 +831,9 @@ bool FavoritesModel::dropMimeData(
           TreeItem * item = getItem( *it );
 
           // Check if we can copy/move this item
-          if ( parentItem->haveAncestor( item ) || parentItem->haveSameItem( item, action == Qt::MoveAction ) )
+          if ( parentItem->haveAncestor( item ) || parentItem->haveSameItem( item, action == Qt::MoveAction ) ) {
             return false;
+          }
 
           movedItems.append( item );
         }
@@ -815,8 +862,9 @@ QModelIndex FavoritesModel::findItemInFolder( const QString & itemName, int item
   TreeItem * parentItem = getItem( parentIdx );
   for ( int i = 0; i < parentItem->childCount(); i++ ) {
     TreeItem * item = parentItem->child( i );
-    if ( item->data().toString() == itemName && item->type() == itemType )
+    if ( item->data().toString() == itemName && item->type() == itemType ) {
       return createIndex( i, 0, item );
+    }
   }
   return QModelIndex();
 }
@@ -825,8 +873,9 @@ TreeItem * FavoritesModel::getItem( const QModelIndex & index ) const
 {
   if ( index.isValid() ) {
     TreeItem * item = static_cast< TreeItem * >( index.internalPointer() );
-    if ( item )
+    if ( item ) {
       return item;
+    }
   }
   return rootItem;
 }
@@ -837,10 +886,12 @@ QStringList FavoritesModel::getTextForIndexes( const QModelIndexList & idxList )
   QModelIndexList::const_iterator it = idxList.begin();
   for ( ; it != idxList.end(); ++it ) {
     TreeItem * item = getItem( *it );
-    if ( item->type() == TreeItem::Word )
+    if ( item->type() == TreeItem::Word ) {
       list.append( item->data().toString() );
-    else
+    }
+    else {
       list.append( item->getTextFromAllChilds() );
+    }
   }
   return list;
 }
@@ -856,8 +907,9 @@ void FavoritesModel::removeItemsForIndexes( const QModelIndexList & idxList )
   QModelIndexList::const_iterator it = idxList.begin();
   for ( ; it != idxList.end(); ++it ) {
     int n = level( *it );
-    if ( n > lowestLevel )
+    if ( n > lowestLevel ) {
       lowestLevel = n;
+    }
     itemsToDelete[ n ].append( *it );
   }
 
@@ -881,10 +933,12 @@ void FavoritesModel::removeItemsForIndexes( const QModelIndexList & idxList )
 QModelIndex FavoritesModel::addNewFolder( const QModelIndex & idx )
 {
   QModelIndex parentIdx;
-  if ( idx.isValid() )
+  if ( idx.isValid() ) {
     parentIdx = parent( idx );
-  else
+  }
+  else {
     parentIdx = idx;
+  }
 
   QString baseName = QString::fromLatin1( "New folder" );
 
@@ -895,11 +949,13 @@ QModelIndex FavoritesModel::addNewFolder( const QModelIndex & idx )
     int i;
     for ( i = 1; i < 1000; i++ ) {
       name = baseName + QString::number( i );
-      if ( !findItemInFolder( name, TreeItem::Folder, parentIdx ).isValid() )
+      if ( !findItemInFolder( name, TreeItem::Folder, parentIdx ).isValid() ) {
         break;
+      }
     }
-    if ( i >= 1000 )
+    if ( i >= 1000 ) {
       return QModelIndex();
+    }
   }
 
   // Create folder with unique name
@@ -934,8 +990,9 @@ bool FavoritesModel::addNewHeadword( const QString & path, const QString & headw
 
   QStringList folders            = path.split( "/", Qt::SkipEmptyParts );
   QStringList::const_iterator it = folders.begin();
-  for ( ; it != folders.end(); ++it )
+  for ( ; it != folders.end(); ++it ) {
     parentIdx = forceFolder( *it, parentIdx );
+  }
 
   // Add headword
 
@@ -952,8 +1009,9 @@ bool FavoritesModel::removeHeadword( const QString & path, const QString & headw
   QStringList::const_iterator it = folders.begin();
   for ( ; it != folders.end(); ++it ) {
     idx = findItemInFolder( *it, TreeItem::Folder, idx );
-    if ( !idx.isValid() )
+    if ( !idx.isValid() ) {
       break;
+    }
   }
 
   if ( path.isEmpty() || idx.isValid() ) {
@@ -979,8 +1037,9 @@ bool FavoritesModel::isHeadwordPresent( const QString & path, const QString & he
   QStringList::const_iterator it = folders.begin();
   for ( ; it != folders.end(); ++it ) {
     idx = findItemInFolder( *it, TreeItem::Folder, idx );
-    if ( !idx.isValid() )
+    if ( !idx.isValid() ) {
       break;
+    }
   }
 
   if ( path.isEmpty() || idx.isValid() ) {
@@ -994,8 +1053,9 @@ bool FavoritesModel::isHeadwordPresent( const QString & path, const QString & he
 QModelIndex FavoritesModel::forceFolder( QString const & name, const QModelIndex & parentIdx )
 {
   QModelIndex idx = findItemInFolder( name, TreeItem::Folder, parentIdx );
-  if ( idx.isValid() )
+  if ( idx.isValid() ) {
     return idx;
+  }
 
   // Folder not found, create it
   TreeItem * parentItem = getItem( parentIdx );
@@ -1014,8 +1074,9 @@ QModelIndex FavoritesModel::forceFolder( QString const & name, const QModelIndex
 bool FavoritesModel::addHeadword( const QString & word, const QModelIndex & parentIdx )
 {
   QModelIndex idx = findItemInFolder( word, TreeItem::Word, parentIdx );
-  if ( idx.isValid() )
+  if ( idx.isValid() ) {
     return false;
+  }
 
   // Headword not found, append it
   TreeItem * parentItem = getItem( parentIdx );
@@ -1047,8 +1108,9 @@ QString FavoritesModel::pathToItem( QModelIndex const & idx )
   QString path;
   QModelIndex parentIdx = parent( idx );
   while ( parentIdx.isValid() ) {
-    if ( !path.isEmpty() )
+    if ( !path.isEmpty() ) {
       path = "/" + path;
+    }
 
     path = data( parentIdx, Qt::DisplayRole ).toString() + path;
 
@@ -1084,15 +1146,16 @@ bool FavoritesModel::setDataFromXml( QString const & dataStr )
 
   if ( !dom.setContent( dataStr, false, &errorStr, &errorLine, &errorColumn ) ) {
     // Mailformed data
-    gdWarning( "XML parsing error: %s at %d,%d\n", errorStr.toUtf8().data(), errorLine, errorColumn );
+    qWarning( "XML parsing error: %s at %d,%d", errorStr.toUtf8().data(), errorLine, errorColumn );
     dom.clear();
     return false;
   }
 
   beginResetModel();
 
-  if ( rootItem )
+  if ( rootItem ) {
     delete rootItem;
+  }
 
   rootItem = new TreeItem( QVariant(), 0, TreeItem::Root );
 
@@ -1112,8 +1175,9 @@ bool FavoritesModel::setDataFromTxt( QString const & dataStr )
 
   beginResetModel();
 
-  if ( rootItem )
+  if ( rootItem ) {
     delete rootItem;
+  }
 
   rootItem = new TreeItem( QVariant(), 0, TreeItem::Root );
 

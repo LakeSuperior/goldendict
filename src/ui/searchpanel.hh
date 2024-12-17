@@ -1,5 +1,4 @@
-#ifndef GOLDENDICT_SEARCHPANEL_H
-#define GOLDENDICT_SEARCHPANEL_H
+#pragma once
 
 #include <QWidget>
 #include <QLineEdit>
@@ -16,9 +15,5 @@ public:
   QPushButton * close;
   QPushButton * previous;
   QPushButton * next;
-  QCheckBox * highlightAll;
   QCheckBox * caseSensitive;
 };
-
-
-#endif //GOLDENDICT_SEARCHPANEL_H

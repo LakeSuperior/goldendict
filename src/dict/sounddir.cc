@@ -2,26 +2,24 @@
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
 #include "sounddir.hh"
-#include "file.hh"
 #include "folding.hh"
-#include "utf8.hh"
+#include "text.hh"
 #include "btreeidx.hh"
 #include "chunkedstorage.hh"
 #include "filetype.hh"
 #include "htmlescape.hh"
 #include "audiolink.hh"
-#include "wstring_qt.hh"
 
 #include "utils.hh"
 
 #include <set>
 #include <QDir>
 #include <QFileInfo>
+#include <QDirIterator>
 
 namespace SoundDir {
 
 using std::string;
-using gd::wstring;
 using std::map;
 using std::multimap;
 using std::set;
@@ -36,6 +34,7 @@ enum {
   CurrentFormatVersion = 1 + BtreeIndexing::FormatVersion + Folding::Version
 };
 
+#pragma pack( push, 1 )
 struct IdxHeader
 {
   uint32_t signature;             // First comes the signature, SDRX
@@ -44,15 +43,13 @@ struct IdxHeader
   uint32_t chunksOffset;          // The offset to chunks' storage
   uint32_t indexBtreeMaxElements; // Two fields from IndexInfo
   uint32_t indexRootOffset;
-}
-#ifndef _MSC_VER
-__attribute__( ( packed ) )
-#endif
-;
+};
+static_assert( alignof( IdxHeader ) == 1 );
+#pragma pack( pop )
 
 bool indexIsOldOrBad( string const & indexFile )
 {
-  File::Class idx( indexFile, "rb" );
+  File::Index idx( indexFile, QIODevice::ReadOnly );
 
   IdxHeader header;
 
@@ -62,9 +59,8 @@ bool indexIsOldOrBad( string const & indexFile )
 
 class SoundDirDictionary: public BtreeIndexing::BtreeDictionary
 {
-  string name;
   QMutex idxMutex;
-  File::Class idx;
+  File::Index idx;
   IdxHeader idxHeader;
   ChunkedStorage::Reader chunks;
   QString iconFilename;
@@ -77,16 +73,6 @@ public:
                       vector< string > const & dictionaryFiles,
                       QString const & iconFilename_ );
 
-  string getName() noexcept override
-  {
-    return name;
-  }
-
-  map< Dictionary::Property, string > getProperties() noexcept override
-  {
-    return map< Dictionary::Property, string >();
-  }
-
   unsigned long getArticleCount() noexcept override
   {
     return idxHeader.soundsCount;
@@ -97,8 +83,10 @@ public:
     return getArticleCount();
   }
 
-  sptr< Dictionary::DataRequest >
-  getArticle( wstring const &, vector< wstring > const & alts, wstring const &, bool ignoreDiacritics ) override;
+  sptr< Dictionary::DataRequest > getArticle( std::u32string const &,
+                                              vector< std::u32string > const & alts,
+                                              std::u32string const &,
+                                              bool ignoreDiacritics ) override;
 
   sptr< Dictionary::DataRequest > getResource( string const & name ) override;
 
@@ -114,20 +102,21 @@ SoundDirDictionary::SoundDirDictionary( string const & id,
                                         vector< string > const & dictionaryFiles,
                                         QString const & iconFilename_ ):
   BtreeDictionary( id, dictionaryFiles ),
-  name( name_ ),
-  idx( indexFile, "rb" ),
+  idx( indexFile, QIODevice::ReadOnly ),
   idxHeader( idx.read< IdxHeader >() ),
   chunks( idx, idxHeader.chunksOffset ),
   iconFilename( iconFilename_ )
 {
+  dictionaryName = name_;
+
   // Initialize the index
 
   openIndex( IndexInfo( idxHeader.indexBtreeMaxElements, idxHeader.indexRootOffset ), idx, idxMutex );
 }
 
-sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & word,
-                                                                vector< wstring > const & alts,
-                                                                wstring const &,
+sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( std::u32string const & word,
+                                                                vector< std::u32string > const & alts,
+                                                                std::u32string const &,
                                                                 bool ignoreDiacritics )
 {
   vector< WordArticleLink > chain = findArticles( word, ignoreDiacritics );
@@ -141,30 +130,33 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & 
   }
 
   // maps to the chain number
-  multimap< wstring, unsigned > mainArticles, alternateArticles;
+  multimap< std::u32string, unsigned > mainArticles, alternateArticles;
 
   set< uint32_t > articlesIncluded; // Some synonims make it that the articles
                                     // appear several times. We combat this
                                     // by only allowing them to appear once.
 
-  wstring wordCaseFolded = Folding::applySimpleCaseOnly( word );
-  if ( ignoreDiacritics )
+  std::u32string wordCaseFolded = Folding::applySimpleCaseOnly( word );
+  if ( ignoreDiacritics ) {
     wordCaseFolded = Folding::applyDiacriticsOnly( wordCaseFolded );
+  }
 
   for ( unsigned x = 0; x < chain.size(); ++x ) {
-    if ( articlesIncluded.find( chain[ x ].articleOffset ) != articlesIncluded.end() )
+    if ( articlesIncluded.find( chain[ x ].articleOffset ) != articlesIncluded.end() ) {
       continue; // We already have this article in the body.
+    }
 
     // Ok. Now, does it go to main articles, or to alternate ones? We list
     // main ones first, and alternates after.
 
     // We do the case-folded comparison here.
 
-    wstring headwordStripped = Folding::applySimpleCaseOnly( chain[ x ].word );
-    if ( ignoreDiacritics )
+    std::u32string headwordStripped = Folding::applySimpleCaseOnly( chain[ x ].word );
+    if ( ignoreDiacritics ) {
       headwordStripped = Folding::applyDiacriticsOnly( headwordStripped );
+    }
 
-    multimap< wstring, unsigned > & mapToUse =
+    multimap< std::u32string, unsigned > & mapToUse =
       ( wordCaseFolded == headwordStripped ) ? mainArticles : alternateArticles;
 
     mapToUse.insert( std::pair( Folding::applySimpleCaseOnly( chain[ x ].word ), x ) );
@@ -172,12 +164,13 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & 
     articlesIncluded.insert( chain[ x ].articleOffset );
   }
 
-  if ( mainArticles.empty() && alternateArticles.empty() )
+  if ( mainArticles.empty() && alternateArticles.empty() ) {
     return std::make_shared< Dictionary::DataRequestInstant >( false ); // No such word
+  }
 
   string result;
 
-  multimap< wstring, uint32_t >::const_iterator i;
+  multimap< std::u32string, uint32_t >::const_iterator i;
 
   string displayedName;
   vector< char > chunk;
@@ -188,8 +181,9 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & 
   for ( i = mainArticles.begin(); i != mainArticles.end(); ++i ) {
     uint32_t address = chain[ i->second ].articleOffset;
 
-    if ( mainArticles.size() + alternateArticles.size() <= 1 )
+    if ( mainArticles.size() + alternateArticles.size() <= 1 ) {
       displayedName = chain[ i->second ].word;
+    }
     else {
       try {
         QMutexLocker _( &idxMutex );
@@ -225,7 +219,7 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & 
 
     string ref = string( "\"" ) + url.toEncoded().data() + "\"";
 
-    result += addAudioLink( ref, getId() );
+    result += addAudioLink( url.toEncoded(), getId() );
 
     result += "<td><a href=" + ref + R"(><img src="qrc:///icons/playsound.png" border="0" alt="Play"/></a></td>)";
     result += "<td><a href=" + ref + ">" + _displayName + "</a></td>";
@@ -235,8 +229,9 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & 
   for ( i = alternateArticles.begin(); i != alternateArticles.end(); ++i ) {
     uint32_t address = chain[ i->second ].articleOffset;
 
-    if ( mainArticles.size() + alternateArticles.size() <= 1 )
+    if ( mainArticles.size() + alternateArticles.size() <= 1 ) {
       displayedName = chain[ i->second ].word;
+    }
     else {
       try {
         QMutexLocker _( &idxMutex );
@@ -272,7 +267,7 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & 
 
     string ref = string( "\"" ) + url.toEncoded().data() + "\"";
 
-    result += addAudioLink( ref, getId() );
+    result += addAudioLink( url.toEncoded(), getId() );
 
     result += "<td><a href=" + ref + R"(><img src="qrc:///icons/playsound.png" border="0" alt="Play"/></a></td>)";
     result += "<td><a href=" + ref + ">" + _displayName + "</a></td>";
@@ -290,16 +285,19 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getArticle( wstring const & 
 
 void SoundDirDictionary::loadIcon() noexcept
 {
-  if ( dictionaryIconLoaded )
+  if ( dictionaryIconLoaded ) {
     return;
+  }
 
   if ( !iconFilename.isEmpty() ) {
     const QFileInfo fInfo( QDir( Config::getConfigDir() ), iconFilename );
-    if ( fInfo.isFile() )
+    if ( fInfo.isFile() ) {
       loadIconFromFile( fInfo.absoluteFilePath(), true );
+    }
   }
-  if ( dictionaryIcon.isNull() )
+  if ( dictionaryIcon.isNull() ) {
     dictionaryIcon = QIcon( ":/icons/sounddir.svg" );
+  }
   dictionaryIconLoaded = true;
 }
 
@@ -345,8 +343,9 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getResource( string const & 
   }
 
 
-  if ( !isNumber )
+  if ( !isNumber ) {
     return std::make_shared< Dictionary::DataRequestInstant >( false ); // No such resource
+  }
 
   QString file_name;
   if ( !get_file_name( articleOffset, file_name ) ) {
@@ -361,7 +360,7 @@ sptr< Dictionary::DataRequest > SoundDirDictionary::getResource( string const & 
   // Now try loading that file
 
   try {
-    File::Class f( fileName.toStdString(), "rb" );
+    File::Index f( fileName.toStdString(), QIODevice::ReadOnly );
 
     sptr< Dictionary::DataRequestInstant > dr = std::make_shared< Dictionary::DataRequestInstant >( true );
 
@@ -390,8 +389,9 @@ void addDir( QDir const & baseDir,
   const QFileInfoList entries = dir.entryInfoList( QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot );
 
   for ( QFileInfoList::const_iterator i = entries.constBegin(); i != entries.constEnd(); ++i ) {
-    if ( i->isDir() )
+    if ( i->isDir() ) {
       addDir( baseDir, QDir( i->absoluteFilePath() ), indexedWords, soundsCount, chunks );
+    }
     else if ( Filetype::isNameOfSound( i->fileName().toUtf8().data() ) ) {
       // Add this sound to index
       string fileName = baseDir.relativeFilePath( i->filePath() ).toUtf8().data();
@@ -399,12 +399,13 @@ void addDir( QDir const & baseDir,
       const uint32_t articleOffset = chunks.startNewBlock();
       chunks.addToBlock( fileName.c_str(), fileName.size() + 1 );
 
-      wstring name = gd::toWString( i->fileName() );
+      std::u32string name = i->fileName().toStdU32String();
 
-      const wstring::size_type pos = name.rfind( L'.' );
+      const std::u32string::size_type pos = name.rfind( L'.' );
 
-      if ( pos != wstring::npos )
+      if ( pos != std::u32string::npos ) {
         name.erase( pos );
+      }
 
       indexedWords.addWord( name, articleOffset );
 
@@ -425,8 +426,9 @@ vector< sptr< Dictionary::Class > > makeDictionaries( Config::SoundDirs const & 
   for ( const auto & soundDir : soundDirs ) {
     QDir dir( soundDir.path );
 
-    if ( !dir.exists() )
+    if ( !dir.exists() ) {
       continue; // No such dir, no dictionary then
+    }
 
     vector< string > dictFiles( 1, QDir::toNativeSeparators( dir.canonicalPath() ).toStdString() );
 
@@ -438,14 +440,36 @@ vector< sptr< Dictionary::Class > > makeDictionaries( Config::SoundDirs const & 
 
     string indexFile = indicesDir + dictId;
 
-    if ( Dictionary::needToRebuildIndex( dictFiles, indexFile ) || indexIsOldOrBad( indexFile ) ) {
+    // Check if the soundDir and its subdirs' modification date changed, that means the user modified the sound files inside
+
+    bool soundDirModified = false;
+    {
+      QDateTime indexFileModifyTime = QFileInfo( QString::fromStdString( indexFile ) ).lastModified();
+      QDirIterator it( dir.path(),
+                       QDir::AllDirs | QDir::NoDotAndDotDot | QDir::NoSymLinks,
+                       QDirIterator::Subdirectories );
+
+      QDeadlineTimer deadline( 4000 );
+      while ( it.hasNext() && !deadline.hasExpired() ) {
+        it.next();
+        if ( it.fileInfo().lastModified() > indexFileModifyTime ) {
+          soundDirModified = true;
+          break;
+        }
+      }
+      if ( deadline.hasExpired() ) {
+        qDebug() << "SoundDir modification scanning timed out.";
+      }
+    }
+
+    if ( Dictionary::needToRebuildIndex( dictFiles, indexFile ) || indexIsOldOrBad( indexFile ) || soundDirModified ) {
       // Building the index
 
       qDebug() << "Sounds: Building the index for directory: " << soundDir.path;
 
       initializing.indexingDictionary( soundDir.name.toUtf8().data() );
 
-      File::Class idx( indexFile, "wb" );
+      File::Index idx( indexFile, QIODevice::WriteOnly );
 
       IdxHeader idxHeader;
 

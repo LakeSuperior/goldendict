@@ -1,8 +1,7 @@
 /* This file is (c) 2008-2012 Konstantin Isakov <ikm@goldendict.org>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef __DICTIONARY_HH_INCLUDED__
-#define __DICTIONARY_HH_INCLUDED__
+#pragma once
 
 #include <map>
 #include <string>
@@ -12,6 +11,7 @@
 #include <QObject>
 #include <QString>
 #include <QWaitCondition>
+#include <QGuiApplication>
 
 #include "config.hh"
 #include "ex.hh"
@@ -19,7 +19,7 @@
 #include "langcoder.hh"
 #include "sptr.hh"
 #include "utils.hh"
-#include "wstring.hh"
+#include "text.hh"
 #include <QtGlobal>
 
 /// Abstract dictionary-related stuff
@@ -27,15 +27,7 @@ namespace Dictionary {
 
 using std::vector;
 using std::string;
-using gd::wstring;
 using std::map;
-
-enum Property {
-  Author,
-  Copyright,
-  Description,
-  Email
-};
 
 DEF_EX( Ex, "Dictionary error", std::exception )
 DEF_EX( exIndexOutOfRange, "The supplied index is out of range", Ex )
@@ -131,19 +123,19 @@ private:
 /// algorithms. Positive values are used by morphology matches.
 struct WordMatch
 {
-  wstring word;
+  std::u32string word;
   int weight;
 
   WordMatch():
     weight( 0 )
   {
   }
-  WordMatch( wstring const & word_ ):
+  WordMatch( std::u32string const & word_ ):
     word( word_ ),
     weight( 0 )
   {
   }
-  WordMatch( wstring const & word_, int weight_ ):
+  WordMatch( std::u32string const & word_, int weight_ ):
     word( word_ ),
     weight( weight_ )
   {
@@ -226,6 +218,8 @@ public:
     hasAnyData( false )
   {
   }
+signals:
+  void finishedArticle( QString articleText );
 
 protected:
   bool hasAnyData; // With this being false, dataSize() always returns -1
@@ -235,6 +229,8 @@ protected:
 /// A helper class for synchronous word search implementations.
 class WordSearchRequestInstant: public WordSearchRequest
 {
+  Q_OBJECT
+
 public:
 
   WordSearchRequestInstant()
@@ -286,7 +282,8 @@ enum Feature {
   /// No features
   NoFeatures = 0,
   /// The dictionary is suitable to query when searching for compound expressions.
-  SuitableForCompoundSearching = 1
+  SuitableForCompoundSearching = 1,
+  WebSite                      = 2
 };
 
 Q_DECLARE_FLAGS( Features, Feature )
@@ -311,12 +308,12 @@ protected:
   QAtomicInt FTS_index_completed;
   bool synonymSearchEnabled;
   string dictionaryName;
-  //default to true;
-  bool enable_FTS = true;
-
+  std::optional< bool > metadata_enable_fts = std::nullopt;
   // Load user icon if it exist
   // By default set icon to empty
   virtual void loadIcon() noexcept;
+
+  static int getOptimalIconSize();
 
   // Load icon from filename directly if isFullName == true
   // else treat filename as name without extension
@@ -372,12 +369,8 @@ public:
 
   void setFtsEnable( bool _enable_FTS )
   {
-    enable_FTS = _enable_FTS;
+    metadata_enable_fts = _enable_FTS;
   }
-
-  /// Returns all the available properties, like the author's name, copyright,
-  /// description etc. All strings are in utf8.
-  virtual map< Property, string > getProperties() noexcept = 0;
 
   /// Returns the features the dictionary possess. See the Feature enum for
   /// their list.
@@ -396,8 +389,8 @@ public:
     auto newProgress = getIndexingFtsProgress();
     if ( newProgress != lastProgress ) {
       lastProgress = newProgress;
-      emit GlobalBroadcaster::instance()->indexingDictionary(
-        QString( "%1......%%2" ).arg( QString::fromStdString( getName() ) ).arg( newProgress ) );
+      emit GlobalBroadcaster::instance()
+        -> indexingDictionary( QString( "%1......%%2" ).arg( QString::fromStdString( getName() ) ).arg( newProgress ) );
     }
   }
 
@@ -437,7 +430,7 @@ public:
   /// prefix results should be added. Not more than maxResults results should
   /// be stored. The whole operation is supposed to be fast, though some
   /// dictionaries, the network ones particularly, may of course be slow.
-  virtual sptr< WordSearchRequest > prefixMatch( wstring const &, unsigned long maxResults ) = 0;
+  virtual sptr< WordSearchRequest > prefixMatch( std::u32string const &, unsigned long maxResults ) = 0;
 
   /// Looks up a given word in the dictionary, aiming to find different forms
   /// of the given word by allowing suffix variations. This means allowing words
@@ -448,20 +441,20 @@ public:
   /// in the middle of a phrase got matched should be returned.
   /// The default implementation does nothing, returning an empty result.
   virtual sptr< WordSearchRequest >
-  stemmedMatch( wstring const &, unsigned minLength, unsigned maxSuffixVariation, unsigned long maxResults );
+  stemmedMatch( std::u32string const &, unsigned minLength, unsigned maxSuffixVariation, unsigned long maxResults );
 
   /// Finds known headwords for the given word, that is, the words for which
   /// the given word is a synonym. If a dictionary can't perform this operation,
   /// it should leave the default implementation which always returns an empty
   /// result.
-  virtual sptr< WordSearchRequest > findHeadwordsForSynonym( wstring const & );
+  virtual sptr< WordSearchRequest > findHeadwordsForSynonym( std::u32string const & );
 
   /// For a given word, provides alternate writings of it which are to be looked
   /// up alongside with it. Transliteration dictionaries implement this. The
   /// default implementation returns an empty list. Note that this function is
   /// supposed to be very fast and simple, and the results are thus returned
   /// synchronously.
-  virtual vector< wstring > getAlternateWritings( wstring const & ) noexcept;
+  virtual vector< std::u32string > getAlternateWritings( std::u32string const & ) noexcept;
 
   /// Returns a definition for the given word. The definition should
   /// be an html fragment (without html/head/body tags) in an utf8 encoding.
@@ -470,10 +463,10 @@ public:
   /// synonyms for the main word.
   /// context is a dictionary-specific data, currently only used for the
   /// 'Websites' feature.
-  virtual sptr< DataRequest > getArticle( wstring const &,
-                                          vector< wstring > const & alts,
-                                          wstring const & context = wstring(),
-                                          bool ignoreDiacritics   = false ) = 0;
+  virtual sptr< DataRequest > getArticle( std::u32string const &,
+                                          vector< std::u32string > const & alts,
+                                          std::u32string const & context = std::u32string(),
+                                          bool ignoreDiacritics          = false ) = 0;
 
   /// Loads contents of a resource named 'name' into the 'data' vector. This is
   /// usually a picture file referenced in the article or something like that.
@@ -520,7 +513,7 @@ public:
   }
 
   /// Make index for full-text search
-  virtual void makeFTSIndex( QAtomicInt &, bool ) {}
+  virtual void makeFTSIndex( QAtomicInt & ) {}
 
   /// Set full-text search parameters
   virtual void setFTSParameters( Config::FullTextSearch const & ) {}
@@ -578,5 +571,3 @@ QString generateRandomDictionaryId();
 QMap< std::string, sptr< Dictionary::Class > > dictToMap( std::vector< sptr< Dictionary::Class > > const & dicts );
 
 } // namespace Dictionary
-
-#endif

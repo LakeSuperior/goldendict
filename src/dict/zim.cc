@@ -5,21 +5,15 @@
 
   #include "zim.hh"
   #include "btreeidx.hh"
-
   #include "folding.hh"
-  #include "gddebug.hh"
-  #include "utf8.hh"
+  #include "text.hh"
   #include "langcoder.hh"
   #include "filetype.hh"
-  #include "file.hh"
+  #include "dictfile.hh"
   #include "utils.hh"
   #include "tiff.hh"
   #include "ftshelpers.hh"
   #include "htmlescape.hh"
-
-  #ifdef _MSC_VER
-    #include <stub_msvc.h>
-  #endif
 
   #include <QByteArray>
   #include <QFile>
@@ -27,14 +21,12 @@
   #include <QAtomicInt>
   #include <QImage>
   #include <QDir>
-
   #include <QRegularExpression>
-
   #include <string>
   #include <set>
   #include <map>
   #include <algorithm>
-  #include <QtConcurrent>
+  #include <QtConcurrentRun>
   #include <utility>
   #include "globalregex.hh"
   #include <zim/zim.h>
@@ -46,12 +38,12 @@
 namespace Zim {
 
 using std::string;
+using std::u32string;
 using std::map;
 using std::vector;
 using std::multimap;
 using std::pair;
 using std::set;
-using gd::wstring;
 
 using BtreeIndexing::WordArticleLink;
 using BtreeIndexing::IndexedWords;
@@ -66,13 +58,12 @@ DEF_EX( exUserAbort, "User abort", Dictionary::Ex )
 using ZimFile = zim::Archive;
 
 
-  #pragma pack( push, 1 )
-
 enum {
   Signature            = 0x584D495A, // ZIMX on little-endian, XMIZ on big-endian
   CurrentFormatVersion = 4 + BtreeIndexing::FormatVersion + Folding::Version
 };
 
+  #pragma pack( push, 1 )
 struct IdxHeader
 {
   quint32 signature;             // First comes the signature, ZIMX
@@ -87,18 +78,14 @@ struct IdxHeader
   quint32 descriptionPtr;
   quint32 langFrom; // Source language
   quint32 langTo;   // Target language
-}
-  #ifndef _MSC_VER
-__attribute__( ( packed ) )
-  #endif
-;
-
+};
+static_assert( alignof( IdxHeader ) == 1 );
   #pragma pack( pop )
 
 // Some supporting functions
 bool indexIsOldOrBad( string const & indexFile )
 {
-  File::Class idx( indexFile, "rb" );
+  File::Index idx( indexFile, QIODevice::ReadOnly );
 
   IdxHeader header;
 
@@ -162,7 +149,7 @@ class ZimDictionary: public BtreeIndexing::BtreeDictionary
 {
   QMutex idxMutex;
   QMutex zimMutex;
-  File::Class idx;
+  File::Index idx;
   IdxHeader idxHeader;
   ZimFile df;
   set< quint32 > articlesIndexedForFTS;
@@ -173,15 +160,6 @@ public:
 
   ~ZimDictionary() = default;
 
-  string getName() noexcept override
-  {
-    return dictionaryName;
-  }
-
-  map< Dictionary::Property, string > getProperties() noexcept override
-  {
-    return {};
-  }
 
   unsigned long getArticleCount() noexcept override
   {
@@ -204,7 +182,7 @@ public:
   }
 
   sptr< Dictionary::DataRequest >
-  getArticle( wstring const &, vector< wstring > const & alts, wstring const &, bool ignoreDiacritics ) override;
+  getArticle( u32string const &, vector< u32string > const & alts, u32string const &, bool ignoreDiacritics ) override;
 
   sptr< Dictionary::DataRequest > getResource( string const & name ) override;
 
@@ -217,15 +195,18 @@ public:
   getSearchResults( QString const & searchString, int searchMode, bool matchCase, bool ignoreDiacritics ) override;
   void getArticleText( uint32_t articleAddress, QString & headword, QString & text ) override;
 
-  void makeFTSIndex( QAtomicInt & isCancelled, bool firstIteration ) override;
+  void makeFTSIndex( QAtomicInt & isCancelled ) override;
 
   void setFTSParameters( Config::FullTextSearch const & fts ) override
   {
-    can_FTS = enable_FTS && fts.enabled && !fts.disabledTypes.contains( "ZIM", Qt::CaseInsensitive )
-      && ( fts.maxDictionarySize == 0 || getArticleCount() <= fts.maxDictionarySize );
+    if ( metadata_enable_fts.has_value() ) {
+      can_FTS = fts.enabled && metadata_enable_fts.value();
+    }
+    else {
+      can_FTS = fts.enabled && !fts.disabledTypes.contains( "ZIM", Qt::CaseInsensitive )
+        && ( fts.maxDictionarySize == 0 || getArticleCount() <= fts.maxDictionarySize );
+    }
   }
-
-  void sortArticlesOffsetsForFTS( QVector< uint32_t > & offsets, QAtomicInt & isCancelled ) override;
 
 protected:
 
@@ -243,7 +224,7 @@ private:
 
 ZimDictionary::ZimDictionary( string const & id, string const & indexFile, vector< string > const & dictionaryFiles ):
   BtreeDictionary( id, dictionaryFiles ),
-  idx( indexFile, "rb" ),
+  idx( indexFile, QIODevice::ReadOnly ),
   idxHeader( idx.read< IdxHeader >() ),
   df( dictionaryFiles[ 0 ] )
 {
@@ -267,8 +248,9 @@ ZimDictionary::ZimDictionary( string const & id, string const & indexFile, vecto
 
 void ZimDictionary::loadIcon() noexcept
 {
-  if ( dictionaryIconLoaded )
+  if ( dictionaryIconLoaded ) {
     return;
+  }
 
   // Try to load Original GD's user provided icon
   QString fileName = QDir::fromNativeSeparators( getDictionaryFilenames()[ 0 ].c_str() );
@@ -296,7 +278,7 @@ void ZimDictionary::loadIcon() noexcept
     return;
   }
   catch ( zim::EntryNotFound & e ) {
-    gdDebug( "ZIM icon not loaded for: %s", dictionaryName.c_str() );
+    qDebug( "ZIM icon not loaded for: %s", dictionaryName.c_str() );
   }
 }
 
@@ -307,8 +289,9 @@ quint32 ZimDictionary::loadArticle( quint32 address, string & articleText, bool 
     QMutexLocker _( &zimMutex );
     ret = readArticle( df, address, articleText );
   }
-  if ( !rawText )
+  if ( !rawText ) {
     articleText = convert( articleText );
+  }
 
   return ret;
 }
@@ -388,9 +371,10 @@ string ZimDictionary::convert( const string & in )
     pos = match.capturedEnd();
 
     QStringList list = match.capturedTexts();
-    // Add empty strings for compatibility with QRegExp behaviour
-    for ( int i = list.size(); i < 5; i++ )
+    // Add empty strings for compatibility with regex behaviour
+    for ( int i = list.size(); i < 5; i++ ) {
       list.append( QString() );
+    }
 
     QString formatTag;
     QString tag = list[ 3 ]; // a url, ex: Precambrian_Chaotian.html
@@ -435,9 +419,10 @@ string ZimDictionary::convert( const string & in )
     pos = match.capturedEnd();
 
     QStringList list = match.capturedTexts();
-    // Add empty strings for compatibility with QRegExp behaviour
-    for ( int i = match.lastCapturedIndex() + 1; i < 3; i++ )
+    // Add empty strings for compatibility with regex behaviour
+    for ( int i = match.lastCapturedIndex() + 1; i < 3; i++ ) {
       list.append( QString() );
+    }
 
     QString tag = list[ 2 ];
     tag
@@ -463,64 +448,47 @@ string ZimDictionary::convert( const string & in )
 
 void ZimDictionary::loadResource( std::string & resourceName, string & data )
 {
-  if ( resourceName.empty() )
+  if ( resourceName.empty() ) {
     return;
+  }
   QMutexLocker _( &zimMutex );
   readArticleByPath( df, resourceName, data );
 }
 
 QString const & ZimDictionary::getDescription()
 {
-  if ( !dictionaryDescription.isEmpty() )
+  if ( !dictionaryDescription.isEmpty() ) {
     return dictionaryDescription;
+  }
 
   dictionaryDescription = QString::fromStdString( df.getMetadata( "Description" ) );
   return dictionaryDescription;
 }
 
-void ZimDictionary::makeFTSIndex( QAtomicInt & isCancelled, bool firstIteration )
+void ZimDictionary::makeFTSIndex( QAtomicInt & isCancelled )
 {
   if ( !( Dictionary::needToRebuildIndex( getDictionaryFilenames(), ftsIdxName )
-          || FtsHelpers::ftsIndexIsOldOrBad( this ) ) )
+          || FtsHelpers::ftsIndexIsOldOrBad( this ) ) ) {
     FTS_index_completed.ref();
+  }
 
-  if ( haveFTSIndex() )
+  if ( haveFTSIndex() ) {
     return;
+  }
 
-  if ( !ensureInitDone().empty() )
+  if ( !ensureInitDone().empty() ) {
     return;
+  }
 
-  if ( firstIteration )
-    return;
-
-  gdDebug( "Zim: Building the full-text index for dictionary: %s\n", getName().c_str() );
+  qDebug( "Zim: Building the full-text index for dictionary: %s", getName().c_str() );
   try {
     FtsHelpers::makeFTSIndex( this, isCancelled );
     FTS_index_completed.ref();
   }
   catch ( std::exception & ex ) {
-    gdWarning( "Zim: Failed building full-text search index for \"%s\", reason: %s\n", getName().c_str(), ex.what() );
+    qWarning( "Zim: Failed building full-text search index for \"%s\", reason: %s", getName().c_str(), ex.what() );
     QFile::remove( ftsIdxName.c_str() );
   }
-}
-
-void ZimDictionary::sortArticlesOffsetsForFTS( QVector< uint32_t > & offsets, QAtomicInt & isCancelled )
-{
-  QVector< QPair< quint32, uint32_t > > offsetsWithClusters;
-  offsetsWithClusters.reserve( offsets.size() );
-
-  for ( QVector< uint32_t >::ConstIterator it = offsets.constBegin(); it != offsets.constEnd(); ++it ) {
-    if ( Utils::AtomicInt::loadAcquire( isCancelled ) )
-      return;
-
-    QMutexLocker _( &zimMutex );
-    offsetsWithClusters.append( QPair< uint32_t, quint32 >( getArticleCluster( df, *it ), *it ) );
-  }
-
-  std::sort( offsetsWithClusters.begin(), offsetsWithClusters.end() );
-
-  for ( int i = 0; i < offsetsWithClusters.size(); i++ )
-    offsets[ i ] = offsetsWithClusters.at( i ).second;
 }
 
 void ZimDictionary::getArticleText( uint32_t articleAddress, QString & headword, QString & text )
@@ -533,7 +501,7 @@ void ZimDictionary::getArticleText( uint32_t articleAddress, QString & headword,
     text = Html::unescape( QString::fromUtf8( articleText.data(), articleText.size() ) );
   }
   catch ( std::exception & ex ) {
-    gdWarning( "Zim: Failed retrieving article from \"%s\", reason: %s\n", getName().c_str(), ex.what() );
+    qWarning( "Zim: Failed retrieving article from \"%s\", reason: %s", getName().c_str(), ex.what() );
   }
 }
 
@@ -551,8 +519,8 @@ ZimDictionary::getSearchResults( QString const & searchString, int searchMode, b
 
 class ZimArticleRequest: public Dictionary::DataRequest
 {
-  wstring word;
-  vector< wstring > alts;
+  u32string word;
+  vector< u32string > alts;
   ZimDictionary & dict;
   bool ignoreDiacritics;
 
@@ -561,7 +529,10 @@ class ZimArticleRequest: public Dictionary::DataRequest
 
 public:
 
-  ZimArticleRequest( wstring word_, vector< wstring > const & alts_, ZimDictionary & dict_, bool ignoreDiacritics_ ):
+  ZimArticleRequest( u32string word_,
+                     vector< u32string > const & alts_,
+                     ZimDictionary & dict_,
+                     bool ignoreDiacritics_ ):
     word( std::move( word_ ) ),
     alts( alts_ ),
     dict( dict_ ),
@@ -603,15 +574,16 @@ void ZimArticleRequest::run()
     chain.insert( chain.end(), altChain.begin(), altChain.end() );
   }
 
-  multimap< wstring, pair< string, string > > mainArticles, alternateArticles;
+  multimap< u32string, pair< string, string > > mainArticles, alternateArticles;
 
   set< quint32 > articlesIncluded; // Some synonyms make it that the articles
                                    // appear several times. We combat this
                                    // by only allowing them to appear once.
 
-  wstring wordCaseFolded = Folding::applySimpleCaseOnly( word );
-  if ( ignoreDiacritics )
+  u32string wordCaseFolded = Folding::applySimpleCaseOnly( word );
+  if ( ignoreDiacritics ) {
     wordCaseFolded = Folding::applyDiacriticsOnly( wordCaseFolded );
+  }
 
   for ( auto & x : chain ) {
     if ( Utils::AtomicInt::loadAcquire( isCancelled ) ) {
@@ -632,22 +604,25 @@ void ZimArticleRequest::run()
     catch ( ... ) {
     }
 
-    if ( articleNumber == 0xFFFFFFFF )
+    if ( articleNumber == 0xFFFFFFFF ) {
       continue; // No article loaded
+    }
 
-    if ( articlesIncluded.find( articleNumber ) != articlesIncluded.end() )
+    if ( articlesIncluded.find( articleNumber ) != articlesIncluded.end() ) {
       continue; // We already have this article in the body.
+    }
 
     // Ok. Now, does it go to main articles, or to alternate ones? We list
     // main ones first, and alternates after.
 
     // We do the case-folded comparison here.
 
-    wstring headwordStripped = Folding::applySimpleCaseOnly( headword );
-    if ( ignoreDiacritics )
+    u32string headwordStripped = Folding::applySimpleCaseOnly( headword );
+    if ( ignoreDiacritics ) {
       headwordStripped = Folding::applyDiacriticsOnly( headwordStripped );
+    }
 
-    multimap< wstring, pair< string, string > > & mapToUse =
+    multimap< u32string, pair< string, string > > & mapToUse =
       ( wordCaseFolded == headwordStripped ) ? mainArticles : alternateArticles;
 
     mapToUse.insert( pair( Folding::applySimpleCaseOnly( headword ), pair( headword, articleText ) ) );
@@ -666,7 +641,7 @@ void ZimArticleRequest::run()
   // See Issue #271: A mechanism to clean-up invalid HTML cards.
   string cleaner = Utils::Html::getHtmlCleaner();
 
-  multimap< wstring, pair< string, string > >::const_iterator i;
+  multimap< u32string, pair< string, string > >::const_iterator i;
 
 
   for ( i = mainArticles.begin(); i != mainArticles.end(); ++i ) {
@@ -694,9 +669,9 @@ void ZimArticleRequest::run()
   finish();
 }
 
-sptr< Dictionary::DataRequest > ZimDictionary::getArticle( wstring const & word,
-                                                           vector< wstring > const & alts,
-                                                           wstring const &,
+sptr< Dictionary::DataRequest > ZimDictionary::getArticle( u32string const & word,
+                                                           vector< u32string > const & alts,
+                                                           u32string const &,
                                                            bool ignoreDiacritics )
 
 {
@@ -750,8 +725,9 @@ void ZimResourceRequest::run()
   try {
     string resource;
     dict.loadResource( resourceName, resource );
-    if ( resource.empty() )
+    if ( resource.empty() ) {
       throw File::Ex();
+    }
 
     if ( Filetype::isNameOfCSS( resourceName ) ) {
       QString css = QString::fromUtf8( resource.data(), resource.size() );
@@ -777,10 +753,10 @@ void ZimResourceRequest::run()
     hasAnyData = true;
   }
   catch ( std::exception & ex ) {
-    gdWarning( "ZIM: Failed loading resource \"%s\" from \"%s\", reason: %s\n",
-               resourceName.c_str(),
-               dict.getName().c_str(),
-               ex.what() );
+    qWarning( "ZIM: Failed loading resource \"%s\" from \"%s\", reason: %s",
+              resourceName.c_str(),
+              dict.getName().c_str(),
+              ex.what() );
     // Resource not loaded -- we don't set the hasAnyData flag then
   }
 
@@ -793,7 +769,7 @@ sptr< Dictionary::DataRequest > ZimDictionary::getResource( string const & name 
   return std::make_shared< ZimResourceRequest >( *this, noLeadingDot.toStdString() );
 }
 
-wstring normalizeWord( const std::string & url );
+u32string normalizeWord( const std::string & url );
 vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & fileNames,
                                                       string const & indicesDir,
                                                       Dictionary::Initializing & initializing,
@@ -832,7 +808,7 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
     try {
       //only check zim file.
       if ( Dictionary::needToRebuildIndex( dictFiles, indexFile ) || indexIsOldOrBad( indexFile ) ) {
-        gdDebug( "Zim: Building the index for dictionary: %s\n", fileName.c_str() );
+        qDebug( "Zim: Building the index for dictionary: %s", fileName.c_str() );
 
         unsigned articleCount = df.getArticleCount();
         unsigned wordCount    = 0;
@@ -842,17 +818,19 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
           initializing.indexingDictionary( firstName.mid( n + 1 ).toUtf8().constData() );
         }
 
-        File::Class idx( indexFile, "wb" );
+        File::Index idx( indexFile, QIODevice::WriteOnly );
         IdxHeader idxHeader;
         memset( &idxHeader, 0, sizeof( idxHeader ) );
         idxHeader.namePtr        = 0xFFFFFFFF;
         idxHeader.descriptionPtr = 0xFFFFFFFF;
 
         auto lang = df.getMetadata( "Language" );
-        if ( lang.size() == 2 )
+        if ( lang.size() == 2 ) {
           idxHeader.langFrom = LangCoder::code2toInt( lang.c_str() );
-        else if ( lang.size() == 3 )
+        }
+        else if ( lang.size() == 3 ) {
           idxHeader.langFrom = LangCoder::findIdForLanguageCode3( lang.c_str() );
+        }
         idxHeader.langTo = idxHeader.langFrom;
         // We write a dummy header first. At the end of the process the header
         // will be rewritten with the right values.
@@ -874,7 +852,7 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
 
           if ( maxHeadwordsToExpand > 0 && ( articleCount >= maxHeadwordsToExpand ) ) {
             if ( !title.empty() ) {
-              wstring word = Utf8::decode( title );
+              u32string word = Text::toUtf32( title );
               indexedWords.addSingleWord( word, index );
             }
             else if ( !url.empty() ) {
@@ -883,7 +861,7 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
           }
           else {
             if ( !title.empty() ) {
-              auto word = Utf8::decode( title );
+              auto word = Text::toUtf32( title );
               indexedWords.addWord( word, index );
               wordCount++;
             }
@@ -918,17 +896,17 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
       dictionaries.push_back( std::make_shared< ZimDictionary >( dictId, indexFile, dictFiles ) );
     }
     catch ( std::exception & e ) {
-      gdWarning( "Zim dictionary initializing failed: %s, error: %s\n", fileName.c_str(), e.what() );
+      qWarning( "Zim dictionary initializing failed: %s, error: %s", fileName.c_str(), e.what() );
       continue;
     }
     catch ( ... ) {
-      qWarning( "Zim dictionary initializing failed\n" );
+      qWarning( "Zim dictionary initializing failed" );
       continue;
     }
   }
   return dictionaries;
 }
-wstring normalizeWord( const std::string & url )
+u32string normalizeWord( const std::string & url )
 {
   auto formattedUrl = QString::fromStdString( url ).remove( RX::Zim::leadingDotSlash );
   return formattedUrl.toStdU32String();

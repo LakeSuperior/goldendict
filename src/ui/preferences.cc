@@ -27,18 +27,6 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
 
   connect( ui.showScanFlag, &QAbstractButton::toggled, this, &Preferences::showScanFlagToggled );
 
-  connect( ui.altKey, &QAbstractButton::clicked, this, &Preferences::wholeAltClicked );
-  connect( ui.ctrlKey, &QAbstractButton::clicked, this, &Preferences::wholeCtrlClicked );
-  connect( ui.shiftKey, &QAbstractButton::clicked, this, &Preferences::wholeShiftClicked );
-
-  connect( ui.leftAlt, &QAbstractButton::clicked, this, &Preferences::sideAltClicked );
-  connect( ui.rightAlt, &QAbstractButton::clicked, this, &Preferences::sideAltClicked );
-  connect( ui.leftCtrl, &QAbstractButton::clicked, this, &Preferences::sideCtrlClicked );
-  connect( ui.rightCtrl, &QAbstractButton::clicked, this, &Preferences::sideCtrlClicked );
-  connect( ui.leftShift, &QAbstractButton::clicked, this, &Preferences::sideShiftClicked );
-  connect( ui.rightShift, &QAbstractButton::clicked, this, &Preferences::sideShiftClicked );
-
-
   helpAction.setShortcut( QKeySequence( "F1" ) );
   helpAction.setShortcutContext( Qt::WidgetWithChildrenShortcut );
 
@@ -73,8 +61,9 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
     //remove .qm suffix.
     QString locale = availLoc.left( availLoc.size() - 3 );
 
-    if ( locale == "qt" )
+    if ( locale == "qt" ) {
       continue; // We skip qt's own localizations
+    }
 
     auto language = Language::languageForLocale( locale );
     if ( language.isEmpty() ) {
@@ -106,29 +95,33 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
   prevWebFontFamily = p.customFonts;
   prevSysFont       = p.interfaceFont;
 
-  if ( !p.customFonts.standard.isEmpty() )
+  if ( !p.customFonts.standard.isEmpty() ) {
     ui.font_standard->setCurrentText( p.customFonts.standard );
+  }
   else {
     ui.font_standard->setCurrentFont(
       QWebEngineProfile::defaultProfile()->settings()->fontFamily( QWebEngineSettings::StandardFont ) );
   }
 
-  if ( !p.customFonts.serif.isEmpty() )
+  if ( !p.customFonts.serif.isEmpty() ) {
     ui.font_serif->setCurrentText( p.customFonts.serif );
+  }
   else {
     ui.font_serif->setCurrentFont(
       QWebEngineProfile::defaultProfile()->settings()->fontFamily( QWebEngineSettings::SerifFont ) );
   }
 
-  if ( !p.customFonts.sansSerif.isEmpty() )
+  if ( !p.customFonts.sansSerif.isEmpty() ) {
     ui.font_sans->setCurrentText( p.customFonts.sansSerif );
+  }
   else {
     ui.font_sans->setCurrentFont(
       QWebEngineProfile::defaultProfile()->settings()->fontFamily( QWebEngineSettings::SansSerifFont ) );
   }
 
-  if ( !p.customFonts.monospace.isEmpty() )
+  if ( !p.customFonts.monospace.isEmpty() ) {
     ui.font_monospace->setCurrentText( p.customFonts.monospace );
+  }
   else {
     ui.font_monospace->setCurrentFont(
       QWebEngineProfile::defaultProfile()->settings()->fontFamily( QWebEngineSettings::FixedFont ) );
@@ -181,6 +174,11 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
   ui.hideSingleTab->setChecked( p.hideSingleTab );
   ui.mruTabOrder->setChecked( p.mruTabOrder );
   ui.enableTrayIcon->setChecked( p.enableTrayIcon );
+
+#ifdef Q_OS_MACOS // macOS uses the dock menu instead of the tray icon
+  ui.enableTrayIcon->hide();
+#endif
+
   ui.startToTray->setChecked( p.startToTray );
   ui.closeToTray->setChecked( p.closeToTray );
   ui.cbAutostart->setChecked( p.autoStart );
@@ -188,16 +186,41 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
   ui.selectBySingleClick->setChecked( p.selectWordBySingleClick );
   ui.autoScrollToTargetArticle->setChecked( p.autoScrollToTargetArticle );
   ui.escKeyHidesMainWindow->setChecked( p.escKeyHidesMainWindow );
-  ui.darkMode->setChecked( p.darkMode );
-  ui.darkReaderMode->setChecked( p.darkReaderMode );
+
+  ui.darkMode->addItem( tr( "On" ), QVariant::fromValue( Config::Dark::On ) );
+  ui.darkMode->addItem( tr( "Off" ), QVariant::fromValue( Config::Dark::Off ) );
+
+  if ( auto i = ui.darkMode->findData( QVariant::fromValue( p.darkMode ) ); i != -1 ) {
+    ui.darkMode->setCurrentIndex( i );
+  }
+
+  ui.darkReaderMode->addItem( tr( "Auto" ), QVariant::fromValue( Config::Dark::Auto ) );
+  ui.darkReaderMode->setItemData( 0, tr( "Auto does nothing on some systems." ), Qt::ToolTipRole );
+  ui.darkReaderMode->addItem( tr( "On" ), QVariant::fromValue( Config::Dark::On ) );
+  ui.darkReaderMode->addItem( tr( "Off" ), QVariant::fromValue( Config::Dark::Off ) );
+
+  if ( auto i = ui.darkReaderMode->findData( QVariant::fromValue( p.darkReaderMode ) ); i != -1 ) {
+    ui.darkReaderMode->setCurrentIndex( i );
+  }
+
+
 #ifndef Q_OS_WIN32
+  // TODO: make this availiable on other platforms
+  ui.darkModeLabel->hide();
   ui.darkMode->hide();
 #endif
 
+  /// Hotkey Tab
   ui.enableMainWindowHotkey->setChecked( p.enableMainWindowHotkey );
   ui.mainWindowHotkey->setKeySequence( p.mainWindowHotkey );
   ui.enableClipboardHotkey->setChecked( p.enableClipboardHotkey );
   ui.clipboardHotkey->setKeySequence( p.clipboardHotkey );
+
+#if QT_VERSION >= QT_VERSION_CHECK( 6, 5, 0 )
+  // Bound by current global hotkey implementations
+  ui.mainWindowHotkey->setMaximumSequenceLength( 2 );
+  ui.clipboardHotkey->setMaximumSequenceLength( 2 );
+#endif
 
   ui.startWithScanPopupOn->setChecked( p.startWithScanPopupOn );
   ui.enableScanPopupModifiers->setChecked( p.enableScanPopupModifiers );
@@ -206,12 +229,6 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
   ui.ctrlKey->setChecked( p.scanPopupModifiers & KeyboardState::Ctrl );
   ui.shiftKey->setChecked( p.scanPopupModifiers & KeyboardState::Shift );
   ui.winKey->setChecked( p.scanPopupModifiers & KeyboardState::Win );
-  ui.leftAlt->setChecked( p.scanPopupModifiers & KeyboardState::LeftAlt );
-  ui.rightAlt->setChecked( p.scanPopupModifiers & KeyboardState::RightAlt );
-  ui.leftCtrl->setChecked( p.scanPopupModifiers & KeyboardState::LeftCtrl );
-  ui.rightCtrl->setChecked( p.scanPopupModifiers & KeyboardState::RightCtrl );
-  ui.leftShift->setChecked( p.scanPopupModifiers & KeyboardState::LeftShift );
-  ui.rightShift->setChecked( p.scanPopupModifiers & KeyboardState::RightShift );
 
   ui.ignoreOwnClipboardChanges->setChecked( p.ignoreOwnClipboardChanges );
   ui.scanToMainWindow->setChecked( p.scanToMainWindow );
@@ -250,12 +267,6 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
 #ifdef Q_OS_WIN32
   ui.winKey->hide();
 #else
-  ui.leftAlt->hide();
-  ui.rightAlt->hide();
-  ui.leftCtrl->hide();
-  ui.rightCtrl->hide();
-  ui.leftShift->hide();
-  ui.rightShift->hide();
   #ifdef Q_OS_MAC
   ui.altKey->setText( "Opt" );
   ui.winKey->setText( "Ctrl" );
@@ -283,7 +294,7 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
   ui.pronounceOnLoadMain->setChecked( p.pronounceOnLoadMain );
   ui.pronounceOnLoadPopup->setChecked( p.pronounceOnLoadPopup );
 
-  ui.internalPlayerBackend->addItems( Config::InternalPlayerBackend::nameList() );
+  ui.internalPlayerBackend->addItems( InternalPlayerBackend::availableBackends() );
 
   // Make sure that exactly one radio button in the group is checked and that
   // on_useExternalPlayer_toggled() is called.
@@ -293,11 +304,13 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
     // Checking ui.useInternalPlayer automatically unchecks ui.useExternalPlayer.
     ui.useInternalPlayer->setChecked( p.useInternalPlayer );
 
-    int index = ui.internalPlayerBackend->findText( p.internalPlayerBackend.uiName() );
-    if ( index < 0 ) // The specified backend is unavailable.
-      index = ui.internalPlayerBackend->findText( Config::InternalPlayerBackend::defaultBackend().uiName() );
-    Q_ASSERT( index >= 0 && "Logic error: the default backend must be present in the backend name list." );
-    ui.internalPlayerBackend->setCurrentIndex( index );
+    int index = ui.internalPlayerBackend->findText( p.internalPlayerBackend.getName() );
+    if ( index >= 0 ) {
+      ui.internalPlayerBackend->setCurrentIndex( index );
+    }
+    else {
+      // Find no backend, just do nothing and let just let Qt select the first one.
+    }
   }
   else {
     ui.useInternalPlayer->hide();
@@ -375,12 +388,10 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
   ui.allowEpwing->setChecked( !p.fts.disabledTypes.contains( "EPWING", Qt::CaseInsensitive ) );
   ui.allowGls->setChecked( !p.fts.disabledTypes.contains( "GLS", Qt::CaseInsensitive ) );
 
-  ui.enablePosition->setChecked( p.fts.enablePosition );
-  ui.enablePosition->hide();
 #ifndef MAKE_ZIM_SUPPORT
   ui.allowZim->hide();
 #endif
-#ifdef NO_EPWING_SUPPORT
+#ifndef EPWING_SUPPORT
   ui.allowEpwing->hide();
 #endif
   ui.maxDictionarySize->setValue( p.fts.maxDictionarySize );
@@ -392,8 +403,9 @@ Preferences::Preferences( QWidget * parent, Config::Class & cfg_ ):
 void Preferences::buildDisabledTypes( QString & disabledTypes, bool is_checked, QString name )
 {
   if ( !is_checked ) {
-    if ( !disabledTypes.isEmpty() )
+    if ( !disabledTypes.isEmpty() ) {
       disabledTypes += ',';
+    }
     disabledTypes += name;
   }
 }
@@ -432,8 +444,9 @@ Config::Preferences Preferences::getPreferences()
   p.autoScrollToTargetArticle  = ui.autoScrollToTargetArticle->isChecked();
   p.escKeyHidesMainWindow      = ui.escKeyHidesMainWindow->isChecked();
 
-  p.darkMode               = ui.darkMode->isChecked();
-  p.darkReaderMode         = ui.darkReaderMode->isChecked();
+  p.darkMode       = ui.darkMode->currentData().value< Config::Dark >();
+  p.darkReaderMode = ui.darkReaderMode->currentData().value< Config::Dark >();
+
   p.enableMainWindowHotkey = ui.enableMainWindowHotkey->isChecked();
   p.mainWindowHotkey       = ui.mainWindowHotkey->keySequence();
   p.enableClipboardHotkey  = ui.enableClipboardHotkey->isChecked();
@@ -446,12 +459,6 @@ Config::Preferences Preferences::getPreferences()
   p.scanPopupModifiers += ui.ctrlKey->isChecked() ? KeyboardState::Ctrl : 0;
   p.scanPopupModifiers += ui.shiftKey->isChecked() ? KeyboardState::Shift : 0;
   p.scanPopupModifiers += ui.winKey->isChecked() ? KeyboardState::Win : 0;
-  p.scanPopupModifiers += ui.leftAlt->isChecked() ? KeyboardState::LeftAlt : 0;
-  p.scanPopupModifiers += ui.rightAlt->isChecked() ? KeyboardState::RightAlt : 0;
-  p.scanPopupModifiers += ui.leftCtrl->isChecked() ? KeyboardState::LeftCtrl : 0;
-  p.scanPopupModifiers += ui.rightCtrl->isChecked() ? KeyboardState::RightCtrl : 0;
-  p.scanPopupModifiers += ui.leftShift->isChecked() ? KeyboardState::LeftShift : 0;
-  p.scanPopupModifiers += ui.rightShift->isChecked() ? KeyboardState::RightShift : 0;
 
   p.ignoreOwnClipboardChanges = ui.ignoreOwnClipboardChanges->isChecked();
   p.scanToMainWindow          = ui.scanToMainWindow->isChecked();
@@ -487,7 +494,7 @@ Config::Preferences Preferences::getPreferences()
   p.pronounceOnLoadMain  = ui.pronounceOnLoadMain->isChecked();
   p.pronounceOnLoadPopup = ui.pronounceOnLoadPopup->isChecked();
   p.useInternalPlayer    = ui.useInternalPlayer->isChecked();
-  p.internalPlayerBackend.setUiName( ui.internalPlayerBackend->currentText() );
+  p.internalPlayerBackend.setName( ui.internalPlayerBackend->currentText() );
   p.audioPlaybackProgram = ui.audioPlaybackProgram->text();
 
   p.proxyServer.enabled        = ui.useProxyServer->isChecked();
@@ -525,7 +532,6 @@ Config::Preferences Preferences::getPreferences()
   p.fts.enabled           = ui.ftsGroupBox->isChecked();
   p.fts.maxDictionarySize = ui.maxDictionarySize->value();
   p.fts.parallelThreads   = ui.parallelThreads->value();
-  p.fts.enablePosition    = ui.enablePosition->isChecked();
 
   buildDisabledTypes( p.fts.disabledTypes, ui.allowAard->isChecked(), "AARD" );
   buildDisabledTypes( p.fts.disabledTypes, ui.allowBGL->isChecked(), "BGL" );
@@ -546,58 +552,18 @@ Config::Preferences Preferences::getPreferences()
 void Preferences::enableScanPopupModifiersToggled( bool b )
 {
   ui.scanPopupModifiers->setEnabled( b );
-  if ( b )
+  if ( b ) {
     ui.showScanFlag->setChecked( false );
+  }
 }
 
 void Preferences::showScanFlagToggled( bool b )
 {
-  if ( b )
+  if ( b ) {
     ui.enableScanPopupModifiers->setChecked( false );
-}
-
-
-void Preferences::wholeAltClicked( bool b )
-{
-  if ( b ) {
-    ui.leftAlt->setChecked( false );
-    ui.rightAlt->setChecked( false );
   }
 }
 
-void Preferences::wholeCtrlClicked( bool b )
-{
-  if ( b ) {
-    ui.leftCtrl->setChecked( false );
-    ui.rightCtrl->setChecked( false );
-  }
-}
-
-void Preferences::wholeShiftClicked( bool b )
-{
-  if ( b ) {
-    ui.leftShift->setChecked( false );
-    ui.rightShift->setChecked( false );
-  }
-}
-
-void Preferences::sideAltClicked( bool )
-{
-  if ( ui.leftAlt->isChecked() || ui.rightAlt->isChecked() )
-    ui.altKey->setChecked( false );
-}
-
-void Preferences::sideCtrlClicked( bool )
-{
-  if ( ui.leftCtrl->isChecked() || ui.rightCtrl->isChecked() )
-    ui.ctrlKey->setChecked( false );
-}
-
-void Preferences::sideShiftClicked( bool )
-{
-  if ( ui.leftShift->isChecked() || ui.rightShift->isChecked() )
-    ui.shiftKey->setChecked( false );
-}
 void Preferences::on_enableMainWindowHotkey_toggled( bool checked )
 {
   ui.mainWindowHotkey->setEnabled( checked );

@@ -1,32 +1,42 @@
 /* This file is (c) 2008-2012 Konstantin Isakov <ikm@goldendict.org>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef __CONFIG_HH_INCLUDED__
-#define __CONFIG_HH_INCLUDED__
+#pragma once
 
-#include <QObject>
-#include <QVector>
-#include <QString>
-#include <QSize>
-#include <QDateTime>
-#include <QKeySequence>
-#include <QSet>
-#include <QMetaType>
+#include "audio/internalplayerbackend.hh"
 #include "ex.hh"
+#include <QDateTime>
 #include <QDomDocument>
+#include <QKeySequence>
+#include <QList>
 #include <QLocale>
-#include <optional>
+#include <QMetaType>
+#include <QObject>
+#include <QSet>
+#include <QSize>
+#include <QString>
 #include <QThread>
+#include <optional>
+
+/// Special group IDs
+enum GroupId : unsigned {
+  AllGroupId  = UINT_MAX - 1, /// The 'All' group
+  HelpGroupId = UINT_MAX,     /// The fictitious 'Help' group
+  NoGroupId   = 0,            /// Invalid value, used to specify that no group id is specified at all.
+};
 
 /// GoldenDict's configuration
 namespace Config {
 
-/// Dictionaries which are temporarily disabled via the dictionary bar.
-typedef QSet< QString > MutedDictionaries;
+// Tri states enum for Dark and Dark reader mode
+enum class Dark : std::uint8_t {
+  Off = 0,
+  On  = 1,
+  Auto = 2,
+};
 
-#ifdef Q_OS_WIN
-  #pragma pack( push, 4 )
-#endif
+/// Dictionaries which are temporarily disabled via the dictionary bar.
+using MutedDictionaries = QSet< QString >;
 
 /// A path where to search for the dictionaries
 struct Path
@@ -51,7 +61,7 @@ struct Path
 };
 
 /// A list of paths where to search for the dictionaries
-typedef QVector< Path > Paths;
+using Paths = QList< Path >;
 
 /// A directory holding bunches of audiofiles, which is indexed into a separate
 /// dictionary.
@@ -76,7 +86,7 @@ struct SoundDir
 };
 
 /// A list of SoundDirs
-typedef QVector< SoundDir > SoundDirs;
+using SoundDirs = QList< SoundDir >;
 
 struct DictionaryRef
 {
@@ -105,7 +115,7 @@ struct Group
   QByteArray iconData;
   QKeySequence shortcut;
   QString favoritesFolder;
-  QVector< DictionaryRef > dictionaries;
+  QList< DictionaryRef > dictionaries;
   Config::MutedDictionaries mutedDictionaries;      // Disabled via dictionary bar
   Config::MutedDictionaries popupMutedDictionaries; // Disabled via dictionary bar in popup
 
@@ -129,7 +139,7 @@ struct Group
 };
 
 /// All the groups
-struct Groups: public QVector< Group >
+struct Groups: public QList< Group >
 {
   unsigned nextId; // Id to use to create the group next time
 
@@ -182,14 +192,11 @@ struct HotKey
   Qt::KeyboardModifiers modifiers;
   int key1, key2;
 
-  HotKey();
-
   /// Hotkey's constructor, take a QKeySequence's first two keys
   /// 1st key's modifier will be the `modifiers` above
   /// 1st key without modifier will becomes `key1`
   /// 2nd key without modifier will becomes `key2`
   /// The relation between the int and qt's KeyCode should consult qt's doc
-
   HotKey( QKeySequence const & );
 
   QKeySequence toKeySequence() const;
@@ -199,8 +206,6 @@ struct FullTextSearch
 {
   int searchMode;
   bool enabled;
-
-  bool enablePosition = false;
 
   quint32 maxDictionarySize;
   quint32 parallelThreads = QThread::idealThreadCount() / 3 + 1;
@@ -265,82 +270,6 @@ struct CustomFonts
   }
 };
 
-/// This class encapsulates supported backend preprocessor logic,
-/// discourages duplicating backend names in code, which is error-prone.
-class InternalPlayerBackend
-{
-public:
-  /// Returns true if at least one backend is available.
-  static bool anyAvailable();
-  /// Returns the default backend or null backend if none is available.
-  static InternalPlayerBackend defaultBackend();
-  /// Returns the name list of supported backends.
-  static QStringList nameList();
-
-  /// Returns true if built with FFmpeg player support and the name matches.
-  bool isFfmpeg() const;
-  /// Returns true if built with Qt Multimedia player support and the name matches.
-  bool isQtmultimedia() const;
-
-  QString const & uiName() const
-  {
-    return name;
-  }
-
-  void setUiName( QString const & name_ )
-  {
-    name = name_;
-  }
-
-  bool operator==( InternalPlayerBackend const & other ) const
-  {
-    return name == other.name;
-  }
-
-  bool operator!=( InternalPlayerBackend const & other ) const
-  {
-    return !operator==( other );
-  }
-
-private:
-#ifdef MAKE_FFMPEG_PLAYER
-  static InternalPlayerBackend ffmpeg()
-  {
-    return InternalPlayerBackend( "FFmpeg" );
-  }
-#endif
-
-#ifdef MAKE_QTMULTIMEDIA_PLAYER
-  static InternalPlayerBackend qtmultimedia()
-  {
-    return InternalPlayerBackend( "Qt Multimedia" );
-  }
-#endif
-
-  explicit InternalPlayerBackend( QString const & name_ ):
-    name( name_ )
-  {
-  }
-
-  QString name;
-};
-
-#if defined( HAVE_X11 )
-  // The ScanPopup window flags customization code has been tested
-  // only in X11 desktop environments and window managers.
-  // None of the window flags configurations I have tried works perfectly well
-  // in XFCE with Qt4. Let us enable customization code for Qt5 exclusively to
-  // avoid regressions with Qt4.
-  #define ENABLE_SPWF_CUSTOMIZATION
-#endif
-
-enum ScanPopupWindowFlags {
-  SPWF_default = 0,
-  SPWF_Popup,
-  SPWF_Tool
-};
-ScanPopupWindowFlags spwfFromInt( int id );
-
 /// Various user preferences
 struct Preferences
 {
@@ -353,9 +282,17 @@ struct Preferences
   bool hideSingleTab;
   bool mruTabOrder;
   bool hideMenubar;
-  bool enableTrayIcon;
-  bool startToTray;
-  bool closeToTray;
+
+#ifdef Q_OS_MACOS // macOS uses the dock menu instead of the tray icon
+  bool closeToTray    = false;
+  bool enableTrayIcon = false;
+  bool startToTray    = false;
+#else
+  bool enableTrayIcon = true;
+  bool closeToTray    = true;
+  bool startToTray    = false;
+#endif
+
   bool autoStart;
   bool doubleClickTranslates;
   bool selectWordBySingleClick;
@@ -392,7 +329,7 @@ struct Preferences
   // Whether the word should be pronounced on page load, in main window/popup
   bool pronounceOnLoadMain, pronounceOnLoadPopup;
   bool useInternalPlayer;
-  InternalPlayerBackend internalPlayerBackend;
+  InternalPlayerBackend internalPlayerBackend{};
   QString audioPlaybackProgram;
 
   ProxyServer proxyServer;
@@ -413,8 +350,8 @@ struct Preferences
   unsigned storeHistory;
   bool alwaysExpandOptionalParts;
 
-  unsigned historyStoreInterval;
-  unsigned favoritesStoreInterval;
+  unsigned historyStoreInterval   = 15; // unit is minutes
+  unsigned favoritesStoreInterval = 15;
 
   bool confirmFavoritesDeletion;
 
@@ -435,8 +372,14 @@ struct Preferences
 
   // Appearances
 
-  bool darkMode;
-  bool darkReaderMode;
+  Dark darkMode       = Dark::Off;
+  Dark darkReaderMode =
+#if defined( Q_OS_MACOS )
+    Dark::Auto;
+#else
+    Dark::Off;
+#endif
+
   QString addonStyle;
   QString displayStyle; // Article Display style (Which also affect interface style on windows)
 
@@ -455,24 +398,32 @@ struct MediaWiki
   QString id, name, url;
   bool enabled;
   QString icon;
+  QString lang;
 
   MediaWiki():
     enabled( false )
   {
   }
 
-  MediaWiki( QString const & id_, QString const & name_, QString const & url_, bool enabled_, QString const & icon_ ):
+  MediaWiki( QString const & id_,
+             QString const & name_,
+             QString const & url_,
+             bool enabled_,
+             QString const & icon_,
+             QString const & lang_ = "" ):
     id( id_ ),
     name( name_ ),
     url( url_ ),
     enabled( enabled_ ),
-    icon( icon_ )
+    icon( icon_ ),
+    lang( lang_ )
   {
   }
 
   bool operator==( MediaWiki const & other ) const
   {
-    return id == other.id && name == other.name && url == other.url && enabled == other.enabled && icon == other.icon;
+    return id == other.id && name == other.name && url == other.url && enabled == other.enabled && icon == other.icon
+      && lang == other.lang;
   }
 };
 
@@ -482,7 +433,7 @@ struct WebSite
   QString id, name, url;
   bool enabled;
   QString iconFilename;
-  bool inside_iframe;
+  bool inside_iframe = false;
 
   WebSite():
     enabled( false )
@@ -512,7 +463,7 @@ struct WebSite
 };
 
 /// All the WebSites
-typedef QVector< WebSite > WebSites;
+using WebSites = QList< WebSite >;
 
 /// Any DICT server
 struct DictServer
@@ -553,14 +504,14 @@ struct DictServer
 };
 
 /// All the DictServers
-typedef QVector< DictServer > DictServers;
+using DictServers = QList< DictServer >;
 
 /// Hunspell configuration
 struct Hunspell
 {
   QString dictionariesPath;
 
-  typedef QVector< QString > Dictionaries;
+  using Dictionaries = QList< QString >;
 
   Dictionaries enabledDictionaries;
 
@@ -576,7 +527,7 @@ struct Hunspell
 };
 
 /// All the MediaWikis
-typedef QVector< MediaWiki > MediaWikis;
+using MediaWikis = QList< MediaWiki >;
 
 
 /// Chinese transliteration configuration
@@ -688,7 +639,7 @@ struct Transliteration
 
 struct Lingua
 {
-  bool enable;
+  bool enable = false;
   QString languageCodes;
 
   bool operator==( Lingua const & other ) const
@@ -727,13 +678,16 @@ struct Forvo
 struct Program
 {
   bool enabled;
+  // NOTE: the value of this enum is used for config
   enum Type {
-    Audio,
-    PlainText,
-    Html,
-    PrefixMatch,
-    MaxTypeValue
-  } type;
+    Invalid      = -1, // Init value
+    Audio        = 0,
+    PlainText    = 1,
+    Html         = 2,
+    PrefixMatch  = 3,
+    MaxTypeValue = 4
+  };
+  Type type = Invalid;
   QString id, name, commandLine;
   QString iconFilename;
 
@@ -769,8 +723,9 @@ struct Program
   }
 };
 
-typedef QVector< Program > Programs;
+using Programs = QList< Program >;
 
+#ifdef TTS_SUPPORT
 struct VoiceEngine
 {
   bool enabled;
@@ -814,7 +769,8 @@ struct VoiceEngine
   }
 };
 
-typedef QVector< VoiceEngine > VoiceEngines;
+using VoiceEngines = QList< VoiceEngine >;
+#endif
 
 struct HeadwordsDialog
 {
@@ -830,6 +786,20 @@ struct HeadwordsDialog
     autoApply( false )
   {
   }
+};
+
+// TODO: arbitrary sizing
+enum class ToolbarsIconSize : std::uint8_t {
+  Small  = 0,
+  Normal = 1,
+  Large  = 2,
+};
+
+struct GroupBackup
+{
+  Group dictionaryOrder;
+  Group inactiveDictionaries;
+  Groups groups;
 };
 
 struct Class
@@ -848,7 +818,9 @@ struct Class
   Lingua lingua;
   Forvo forvo;
   Programs programs;
+#ifdef TTS_SUPPORT
   VoiceEngines voiceEngines;
+#endif
 
   unsigned lastMainGroupId;  // Last used group in main window
   unsigned lastPopupGroupId; // Last used group in popup window
@@ -856,7 +828,7 @@ struct Class
   QByteArray popupWindowState;           // Binary state saved by QMainWindow
   QByteArray popupWindowGeometry;        // Geometry saved by QMainWindow
   QByteArray dictInfoGeometry;           // Geometry of "Dictionary info" window
-  QByteArray inspectorGeometry;          // Geometry of WebKit inspector window
+  QByteArray inspectorGeometry;          // Geometry of Web Engine inspector window
   QByteArray dictionariesDialogGeometry; // Geometry of Dictionaries dialog
 
   QString historyExportPath; // Path for export/import history
@@ -864,7 +836,7 @@ struct Class
   QString articleSavePath;   // Path to save articles
 
   bool pinPopupWindow;         // Last pin status
-  bool popupWindowAlwaysOnTop; // Last status of pinned popup window
+  bool popupWindowAlwaysOnTop = false; // Last status of pinned popup window
 
   QByteArray mainWindowState;    // Binary state saved by QMainWindow
   QByteArray mainWindowGeometry; // Geometry saved by QMainWindow
@@ -878,7 +850,7 @@ struct Class
 
   bool showingDictBarNames;
 
-  bool usingSmallIconsInToolbars;
+  ToolbarsIconSize usingToolbarsIconSize = ToolbarsIconSize::Normal;
 
   /// Maximum size for the headwords.
   /// Bigger headwords won't be indexed. For now, only in DSL.
@@ -888,14 +860,11 @@ struct Class
 
   HeadwordsDialog headwordsDialog;
 
-  QString editDictionaryCommandLine; // Command line to call external editor for dictionary
-
   Class():
     lastMainGroupId( 0 ),
     lastPopupGroupId( 0 ),
     pinPopupWindow( false ),
     showingDictBarNames( false ),
-    usingSmallIconsInToolbars( false ),
     maxHeadwordSize( 256U ),
     maxHeadwordsToExpand( 0 )
   {
@@ -904,12 +873,8 @@ struct Class
   Group const * getGroup( unsigned id ) const;
   //disable tts dictionary. does not need to save to persistent file
   bool notts = false;
-  bool resetState;
+  bool resetState = false;
 };
-
-#ifdef Q_OS_WIN
-  #pragma pack( pop )
-#endif
 
 /// Configuration-specific events. Some parts of the program need to react
 /// to specific changes in configuration. The object of this class is used
@@ -1014,5 +979,3 @@ QString getStylesDir();
 QString getCacheDir() noexcept;
 
 } // namespace Config
-
-#endif

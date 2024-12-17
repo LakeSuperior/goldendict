@@ -1,23 +1,13 @@
 /* This file is (c) 2014 Abs62
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#include "fulltextsearch.hh"
 #include "ftshelpers.hh"
-#include "gddebug.hh"
-#include "help.hh"
-
-#include <QThreadPool>
-#include <QMessageBox>
-#include <qalgorithms.h>
-
-#if defined( Q_OS_WIN32 )
-
-  #include "initializing.hh"
-  #include <qt_windows.h>
-  #include <QOperatingSystemVersion>
-
-#endif
+#include "fulltextsearch.hh"
 #include "globalregex.hh"
+#include "help.hh"
+#include <QFutureSynchronizer>
+#include <QMessageBox>
+#include <QThreadPool>
 
 namespace FTS {
 
@@ -43,7 +33,7 @@ void Indexing::run()
           const QString & dictionaryName = QString::fromUtf8( dictionary->getName().c_str() );
           qDebug() << "[FULLTEXT] checking fts for the dictionary:" << dictionaryName;
           emit sendNowIndexingName( dictionaryName );
-          dictionary->makeFTSIndex( isCancelled, false );
+          dictionary->makeFTSIndex( isCancelled );
         } );
         synchronizer.addFuture( f );
       }
@@ -55,7 +45,7 @@ void Indexing::run()
     timerThread->wait();
   }
   catch ( std::exception & ex ) {
-    gdWarning( "Exception occurred while full-text search: %s", ex.what() );
+    qWarning( "Exception occurred while full-text search: %s", ex.what() );
   }
   emit sendNowIndexingName( QString() );
 }
@@ -64,16 +54,18 @@ void Indexing::timeout()
 {
   QString indexingDicts;
   for ( const auto & dictionary : dictionaries ) {
-    if ( Utils::AtomicInt::loadAcquire( isCancelled ) )
+    if ( Utils::AtomicInt::loadAcquire( isCancelled ) ) {
       break;
+    }
     //Finished, clear the msg.
     if ( dictionary->haveFTSIndex() ) {
       continue;
     }
     auto newProgress = dictionary->getIndexingFtsProgress();
     if ( newProgress > 0 && newProgress < 100 ) {
-      if ( !indexingDicts.isEmpty() )
+      if ( !indexingDicts.isEmpty() ) {
         indexingDicts.append( "," );
+      }
       indexingDicts.append(
         QString( "%1......%%2" ).arg( QString::fromStdString( dictionary->getName() ) ).arg( newProgress ) );
     }
@@ -92,12 +84,14 @@ FtsIndexing::FtsIndexing( std::vector< sptr< Dictionary::Class > > const & dicts
 
 void FtsIndexing::doIndexing()
 {
-  if ( started )
+  if ( started ) {
     stopIndexing();
+  }
 
   if ( !started ) {
-    while ( Utils::AtomicInt::loadAcquire( isCancelled ) )
+    while ( Utils::AtomicInt::loadAcquire( isCancelled ) ) {
       isCancelled.deref();
+    }
 
     Indexing * idx = new Indexing( isCancelled, dictionaries, indexingExited );
 
@@ -112,8 +106,9 @@ void FtsIndexing::doIndexing()
 void FtsIndexing::stopIndexing()
 {
   if ( started ) {
-    if ( !Utils::AtomicInt::loadAcquire( isCancelled ) )
+    if ( !Utils::AtomicInt::loadAcquire( isCancelled ) ) {
       isCancelled.ref();
+    }
 
     indexingExited.acquire();
     started = false;
@@ -141,8 +136,9 @@ void addSortedHeadwords( QList< FtsHeadword > & base_list, QList< FtsHeadword > 
 {
   QList< FtsHeadword > list;
 
-  if ( add_list.isEmpty() )
+  if ( add_list.isEmpty() ) {
     return;
+  }
 
   if ( base_list.isEmpty() ) {
     base_list = add_list;
@@ -180,8 +176,9 @@ void addSortedHeadwords( QList< FtsHeadword > & base_list, QList< FtsHeadword > 
       for ( QStringList::const_iterator itr = add_it->foundHiliteRegExps.constBegin();
             itr != add_it->foundHiliteRegExps.constEnd();
             ++itr ) {
-        if ( !base_it->foundHiliteRegExps.contains( *itr ) )
+        if ( !base_it->foundHiliteRegExps.contains( *itr ) ) {
           base_it->foundHiliteRegExps.append( *itr );
+        }
       }
       ++add_it;
     }
@@ -214,8 +211,9 @@ FullTextSearchDialog::FullTextSearchDialog( QWidget * parent,
 
   setWindowTitle( tr( "Full-text search" ) );
 
-  if ( cfg.preferences.fts.dialogGeometry.size() > 0 )
+  if ( cfg.preferences.fts.dialogGeometry.size() > 0 ) {
     restoreGeometry( cfg.preferences.fts.dialogGeometry );
+  }
 
   setNewIndexingName( ftsIdx.nowIndexingName() );
 
@@ -226,10 +224,9 @@ FullTextSearchDialog::FullTextSearchDialog( QWidget * parent,
            &FullTextSearchDialog::setNewIndexingName );
 
   ui.searchMode->addItem( tr( "Default" ), WholeWords );
-  ui.searchMode->addItem( tr( "Plain text" ), PlainText );
   ui.searchMode->addItem( tr( "Wildcards" ), Wildcards );
 
-  ui.searchLine->setToolTip( tr( "support xapian search syntax,such as AND OR +/- etc" ) );
+  ui.searchLine->setToolTip( tr( "Support xapian search syntax, such as AND OR +/- etc." ) );
 
   ui.searchMode->setCurrentIndex( cfg.preferences.fts.searchMode );
 
@@ -261,8 +258,9 @@ FullTextSearchDialog::FullTextSearchDialog( QWidget * parent,
   ui.headwordsView->installEventFilter( this );
 
   delegate = new WordListItemDelegate( ui.headwordsView->itemDelegate() );
-  if ( delegate )
+  if ( delegate ) {
     ui.headwordsView->setItemDelegate( delegate );
+  }
 
   ui.searchLine->selectAll();
 }
@@ -274,19 +272,24 @@ void FullTextSearchDialog::setSearchText( const QString & text )
 
 FullTextSearchDialog::~FullTextSearchDialog()
 {
-  if ( delegate )
+  if ( delegate ) {
     delegate->deleteLater();
+  }
 }
 
 void FullTextSearchDialog::stopSearch()
 {
   if ( !searchReqs.empty() ) {
-    for ( std::list< sptr< Dictionary::DataRequest > >::iterator it = searchReqs.begin(); it != searchReqs.end(); ++it )
-      if ( !( *it )->isFinished() )
+    for ( std::list< sptr< Dictionary::DataRequest > >::iterator it = searchReqs.begin(); it != searchReqs.end();
+          ++it ) {
+      if ( !( *it )->isFinished() ) {
         ( *it )->cancel();
+      }
+    }
 
-    while ( searchReqs.size() )
+    while ( searchReqs.size() ) {
       QApplication::processEvents();
+    }
   }
 }
 
@@ -296,10 +299,12 @@ void FullTextSearchDialog::showDictNumbers()
 
   unsigned ready = 0, toIndex = 0;
   for ( unsigned x = 0; x < activeDicts.size(); x++ ) {
-    if ( activeDicts.at( x )->haveFTSIndex() )
+    if ( activeDicts.at( x )->haveFTSIndex() ) {
       ready++;
-    else
+    }
+    else {
       toIndex++;
+    }
   }
 
   ui.readyDicts->setText( QString::number( ready ) );
@@ -383,7 +388,7 @@ void FullTextSearchDialog::searchReqFinished()
     std::list< sptr< Dictionary::DataRequest > >::iterator it;
     for ( it = searchReqs.begin(); it != searchReqs.end(); ++it ) {
       if ( ( *it )->isFinished() ) {
-        GD_DPRINTF( "one finished.\n" );
+        qDebug( "one finished." );
 
         QString errorString = ( *it )->getErrorString();
 
@@ -399,7 +404,7 @@ void FullTextSearchDialog::searchReqFinished()
               addSortedHeadwords( allHeadwords, hws );
             }
             catch ( std::exception & e ) {
-              gdWarning( "getDataSlice error: %s\n", e.what() );
+              qWarning( "getDataSlice error: %s", e.what() );
             }
           }
         }
@@ -407,19 +412,21 @@ void FullTextSearchDialog::searchReqFinished()
       }
     }
     if ( it != searchReqs.end() ) {
-      GD_DPRINTF( "erasing..\n" );
+      qDebug( "erasing.." );
       searchReqs.erase( it );
-      GD_DPRINTF( "erase done..\n" );
+      qDebug( "erase done.." );
       continue;
     }
-    else
+    else {
       break;
+    }
   }
 
   if ( !allHeadwords.isEmpty() ) {
     model->addResults( QModelIndex(), allHeadwords );
-    if ( results.size() > matchedCount )
+    if ( results.size() > matchedCount ) {
       ui.articlesFoundLabel->setText( tr( "Articles found: " ) + QString::number( results.size() ) );
+    }
   }
 
   if ( searchReqs.empty() ) {
@@ -437,8 +444,9 @@ void FullTextSearchDialog::matchCount( int _matchCount )
 
 void FullTextSearchDialog::reject()
 {
-  if ( !searchReqs.empty() )
+  if ( !searchReqs.empty() ) {
     stopSearch();
+  }
   else {
     saveData();
     emit closeDialog();
@@ -449,31 +457,12 @@ void FullTextSearchDialog::itemClicked( const QModelIndex & idx )
 {
   if ( idx.isValid() && idx.row() < results.size() ) {
     QString headword = results[ idx.row() ].headword;
-    QRegExp reg;
+    QRegularExpression reg;
     auto searchText = ui.searchLine->text();
     searchText.replace( RX::Ftx::tokenBoundary, " " );
 
-    auto it = RX::Ftx::token.globalMatch( searchText );
-    QString firstAvailbeItem;
-    while ( it.hasNext() ) {
-      QRegularExpressionMatch match = it.next();
-
-      auto p = match.captured();
-      if ( p.startsWith( '-' ) )
-        continue;
-
-      //the searched text should be like "term".remove enclosed double quotation marks.
-      if ( p.startsWith( "\"" ) ) {
-        p.remove( "\"" );
-      }
-
-      firstAvailbeItem = p;
-      break;
-    }
-
-    if ( !firstAvailbeItem.isEmpty() ) {
-      reg = QRegExp( firstAvailbeItem, Qt::CaseInsensitive, QRegExp::RegExp2 );
-      reg.setMinimal( true );
+    if ( !searchText.isEmpty() ) {
+      reg = QRegularExpression( searchText, QRegularExpression::CaseInsensitiveOption );
     }
 
     emit showTranslationFor( headword, results[ idx.row() ].dictIDs, reg, false );
@@ -488,11 +477,12 @@ void FullTextSearchDialog::updateDictionaries()
 
   Instances::Group const * activeGroup = 0;
 
-  for ( unsigned x = 0; x < groups.size(); ++x )
+  for ( unsigned x = 0; x < groups.size(); ++x ) {
     if ( groups[ x ].id == group ) {
       activeGroup = &groups[ x ];
       break;
     }
+  }
 
   // If we've found a group, use its dictionaries; otherwise, use the global
   // heap.
@@ -503,21 +493,27 @@ void FullTextSearchDialog::updateDictionaries()
   Config::Group const * grp = cfg.getGroup( group );
   Config::MutedDictionaries const * mutedDicts;
 
-  if ( group == Instances::Group::AllGroupId )
+  if ( group == GroupId::AllGroupId ) {
     mutedDicts = &cfg.mutedDictionaries;
-  else
+  }
+  else {
     mutedDicts = grp ? &grp->mutedDictionaries : 0;
+  }
 
   if ( mutedDicts && !mutedDicts->isEmpty() ) {
     activeDicts.reserve( groupDicts.size() );
-    for ( unsigned x = 0; x < groupDicts.size(); ++x )
-      if ( groupDicts[ x ]->canFTS() && !mutedDicts->contains( QString::fromStdString( groupDicts[ x ]->getId() ) ) )
+    for ( unsigned x = 0; x < groupDicts.size(); ++x ) {
+      if ( groupDicts[ x ]->canFTS() && !mutedDicts->contains( QString::fromStdString( groupDicts[ x ]->getId() ) ) ) {
         activeDicts.push_back( groupDicts[ x ] );
+      }
+    }
   }
   else {
-    for ( unsigned x = 0; x < groupDicts.size(); ++x )
-      if ( groupDicts[ x ]->canFTS() )
+    for ( unsigned x = 0; x < groupDicts.size(); ++x ) {
+      if ( groupDicts[ x ]->canFTS() ) {
         activeDicts.push_back( groupDicts[ x ] );
+      }
+    }
   }
 
   showDictNumbers();
@@ -544,24 +540,28 @@ int HeadwordsListModel::rowCount( QModelIndex const & ) const
 
 QVariant HeadwordsListModel::data( QModelIndex const & index, int role ) const
 {
-  if ( index.row() < 0 )
+  if ( index.row() < 0 ) {
     return QVariant();
+  }
 
   FtsHeadword const & head = headwords[ index.row() ];
 
-  if ( head.headword.isEmpty() )
+  if ( head.headword.isEmpty() ) {
     return QVariant();
+  }
 
   switch ( role ) {
     case Qt::ToolTipRole: {
       QString tt;
       for ( int x = 0; x < head.dictIDs.size(); x++ ) {
-        if ( x != 0 )
+        if ( x != 0 ) {
           tt += "<br>";
+        }
 
         int n = getDictIndex( head.dictIDs[ x ] );
-        if ( n != -1 )
+        if ( n != -1 ) {
           tt += QString::fromUtf8( dictionaries[ n ]->getName().c_str() );
+        }
       }
       return tt;
     }
@@ -606,8 +606,9 @@ int HeadwordsListModel::getDictIndex( QString const & id ) const
 {
   std::string dictID( id.toUtf8().data() );
   for ( unsigned x = 0; x < dictionaries.size(); x++ ) {
-    if ( dictionaries[ x ]->getId().compare( dictID ) == 0 )
+    if ( dictionaries[ x ]->getId().compare( dictID ) == 0 ) {
       return x;
+    }
   }
   return -1;
 }
@@ -617,13 +618,16 @@ QString FtsHeadword::trimQuotes( QString const & str ) const
   QString trimmed( str );
 
   int n = 0;
-  while ( str[ n ] == '\"' || str[ n ] == '\'' )
+  while ( str[ n ] == '\"' || str[ n ] == '\'' ) {
     n++;
-  if ( n )
+  }
+  if ( n ) {
     trimmed = trimmed.mid( n );
+  }
 
-  while ( trimmed.endsWith( '\"' ) || trimmed.endsWith( '\'' ) )
+  while ( trimmed.endsWith( '\"' ) || trimmed.endsWith( '\'' ) ) {
     trimmed.chop( 1 );
+  }
 
   return trimmed;
 }
@@ -634,13 +638,15 @@ bool FtsHeadword::operator<( FtsHeadword const & other ) const
   QString second = trimQuotes( other.headword );
 
   int result = first.localeAwareCompare( second );
-  if ( result )
+  if ( result ) {
     return result < 0;
+  }
 
   // Headwords without quotes are equal
 
-  if ( first.size() != headword.size() || second.size() != other.headword.size() )
+  if ( first.size() != headword.size() || second.size() != other.headword.size() ) {
     return headword.localeAwareCompare( other.headword ) < 0;
+  }
 
   return false;
 }

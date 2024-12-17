@@ -6,18 +6,15 @@
 #include <cstdio>
 #include "dictionary.hh"
 
-#include <QCryptographicHash>
-
 // For needToRebuildIndex(), read below
 #include <QFileInfo>
 #include <QDateTime>
 
 #include "config.hh"
 #include <QDir>
-#include <QFileInfo>
 #include <QCryptographicHash>
-#include <QDateTime>
 #include <QImage>
+#include <QPixmap>
 #include <QPainter>
 #include <QRegularExpression>
 #include "utils.hh"
@@ -78,16 +75,18 @@ WordMatch WordSearchRequest::operator[]( size_t index )
 {
   QMutexLocker _( &dataMutex );
 
-  if ( index >= matches.size() )
+  if ( index >= matches.size() ) {
     throw exIndexOutOfRange();
+  }
 
   return matches[ index ];
 }
 
 vector< WordMatch > & WordSearchRequest::getAllMatches()
 {
-  if ( !isFinished() )
+  if ( !isFinished() ) {
     throw exRequestUnfinished();
+  }
 
   return matches;
 }
@@ -95,12 +94,15 @@ vector< WordMatch > & WordSearchRequest::getAllMatches()
 void WordSearchRequest::addMatch( WordMatch const & match )
 {
   unsigned n;
-  for ( n = 0; n < matches.size(); n++ )
-    if ( matches[ n ].word.compare( match.word ) == 0 )
+  for ( n = 0; n < matches.size(); n++ ) {
+    if ( matches[ n ].word.compare( match.word ) == 0 ) {
       break;
+    }
+  }
 
-  if ( n >= matches.size() )
+  if ( n >= matches.size() ) {
     matches.push_back( match );
+  }
 }
 
 ////////////// DataRequest
@@ -144,16 +146,18 @@ void DataRequest::getDataSlice( size_t offset, size_t size, void * buffer )
   }
   QMutexLocker _( &dataMutex );
 
-  if ( !hasAnyData )
+  if ( !hasAnyData ) {
     throw exSliceOutOfRange();
+  }
 
   memcpy( buffer, &data[ offset ], size );
 }
 
 vector< char > & DataRequest::getFullData()
 {
-  if ( !isFinished() )
+  if ( !isFinished() ) {
     throw exRequestUnfinished();
+  }
 
   return data;
 }
@@ -173,22 +177,20 @@ void Class::deferredInit()
   //base method.
 }
 
-sptr< WordSearchRequest > Class::stemmedMatch( wstring const & /*str*/,
+sptr< WordSearchRequest > Class::stemmedMatch( std::u32string const & /*str*/,
                                                unsigned /*minLength*/,
                                                unsigned /*maxSuffixVariation*/,
                                                unsigned long /*maxResults*/ )
-
 {
   return std::make_shared< WordSearchRequestInstant >();
 }
 
-sptr< WordSearchRequest > Class::findHeadwordsForSynonym( wstring const & )
-
+sptr< WordSearchRequest > Class::findHeadwordsForSynonym( std::u32string const & )
 {
   return std::make_shared< WordSearchRequestInstant >();
 }
 
-vector< wstring > Class::getAlternateWritings( wstring const & ) noexcept
+vector< std::u32string > Class::getAlternateWritings( std::u32string const & ) noexcept
 {
   return {};
 }
@@ -197,8 +199,9 @@ QString Class::getContainingFolder() const
 {
   if ( !dictionaryFiles.empty() ) {
     auto fileInfo = QFileInfo( QString::fromStdString( dictionaryFiles[ 0 ] ) );
-    if ( fileInfo.isDir() )
+    if ( fileInfo.isDir() ) {
       return fileInfo.absoluteFilePath();
+    }
     return fileInfo.absolutePath();
   }
 
@@ -228,8 +231,9 @@ QString Class::getMainFilename()
 
 QIcon const & Class::getIcon() noexcept
 {
-  if ( !dictionaryIconLoaded )
+  if ( !dictionaryIconLoaded ) {
     loadIcon();
+  }
   return dictionaryIcon;
 }
 
@@ -238,13 +242,19 @@ void Class::loadIcon() noexcept
   dictionaryIconLoaded = true;
 }
 
+int Class::getOptimalIconSize()
+{
+  return 64 * qGuiApp->devicePixelRatio();
+}
+
 bool Class::loadIconFromFile( QString const & _filename, bool isFullName )
 {
   QFileInfo info;
   QString fileName( _filename );
 
-  if ( isFullName )
+  if ( isFullName ) {
     info = QFileInfo( fileName );
+  }
   else {
     fileName += "bmp";
     info = QFileInfo( fileName );
@@ -266,33 +276,14 @@ bool Class::loadIconFromFile( QString const & _filename, bool isFullName )
   }
 
   if ( info.isFile() ) {
-    QImage img( fileName );
+    auto iconSize = getOptimalIconSize();
+    QPixmap img( fileName );
 
     if ( !img.isNull() ) {
       // Load successful
 
-      //some icon is very large ,will crash the application.
-      img = img.scaledToWidth( 64 );
-      // Apply the color key
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
-      img.setAlphaChannel( img.createMaskFromColor( QColor( 192, 192, 192 ).rgb(), Qt::MaskOutColor ) );
-#endif
-
-      // Transform it to be square
-      int max = img.width() > img.height() ? img.width() : img.height();
-
-      QImage result( max, max, QImage::Format_ARGB32 );
-      result.fill( 0 ); // Black transparent
-
-      QPainter painter( &result );
-      painter.setRenderHint( QPainter::RenderHint::Antialiasing );
-      painter.drawImage( QPoint( img.width() == max ? 0 : ( max - img.width() ) / 2,
-                                 img.height() == max ? 0 : ( max - img.height() ) / 2 ),
-                         img );
-
-      painter.end();
-
-      dictionaryIcon = QIcon( QPixmap::fromImage( result ) );
+      auto result    = img.scaled( { iconSize, iconSize }, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation );
+      dictionaryIcon = QIcon( result );
 
       return !dictionaryIcon.isNull();
     }
@@ -302,23 +293,18 @@ bool Class::loadIconFromFile( QString const & _filename, bool isFullName )
 
 bool Class::loadIconFromText( QString iconUrl, QString const & text )
 {
-  if ( text.isEmpty() )
+  if ( text.isEmpty() ) {
     return false;
+  }
   QImage img( iconUrl );
 
   if ( !img.isNull() ) {
-    int iconSize = 64;
-    //some icon is very large ,will crash the application.
-    img = img.scaledToWidth( iconSize );
-    QImage result( iconSize, iconSize, QImage::Format_ARGB32 );
-    result.fill( 0 ); // Black transparent
-    int max = img.width() > img.height() ? img.width() : img.height();
+    auto iconSize = getOptimalIconSize();
+
+    QImage result = img.scaled( { iconSize, iconSize }, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation );
 
     QPainter painter( &result );
-    painter.setRenderHint( QPainter::RenderHint::Antialiasing );
-    painter.drawImage( QPoint( img.width() == max ? 0 : ( max - img.width() ) / 2,
-                               img.height() == max ? 0 : ( max - img.height() ) / 2 ),
-                       img );
+    painter.setRenderHints( QPainter::Antialiasing | QPainter::TextAntialiasing );
     painter.setCompositionMode( QPainter::CompositionMode_SourceAtop );
 
     QFont font = painter.font();
@@ -346,15 +332,17 @@ bool Class::loadIconFromText( QString iconUrl, QString const & text )
 
 QString Class::getAbbrName( QString const & text )
 {
-  if ( text.isEmpty() )
+  if ( text.isEmpty() ) {
     return {};
+  }
   //remove whitespace,number,mark,puncuation,symbol
   QString simplified = text;
   simplified.remove(
     QRegularExpression( R"([\p{Z}\p{N}\p{M}\p{P}\p{S}])", QRegularExpression::UseUnicodePropertiesOption ) );
 
-  if ( simplified.isEmpty() )
+  if ( simplified.isEmpty() ) {
     return {};
+  }
   int index = qHash( simplified ) % simplified.size();
 
   QString abbrName;
@@ -375,9 +363,11 @@ QString Class::getAbbrName( QString const & text )
 
 void Class::isolateCSS( QString & css, QString const & wrapperSelector )
 {
-  if ( css.isEmpty() )
+  if ( css.isEmpty() ) {
     return;
+  }
 
+  //comment syntax like:/* */
   QRegularExpression reg1( R"(\/\*(?:.(?!\*\/))*.?\*\/)", QRegularExpression::DotMatchesEverythingOption );
   QRegularExpression reg2( R"([ \*\>\+,;:\[\{\]])" );
   QRegularExpression reg3( "[,;\\{]" );
@@ -387,15 +377,20 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
   QString newCSS;
   QString prefix( "#gdfrom-" );
   prefix += QString::fromLatin1( getId().c_str() );
-  if ( !wrapperSelector.isEmpty() )
+  if ( !wrapperSelector.isEmpty() ) {
     prefix += " " + wrapperSelector;
+  }
 
   // Strip comments
   css.replace( reg1, QString() );
 
+  //replace the pseudo root selector with the prefix,like ":root  {"  to  "html{"
+  css.replace( QRegularExpression( R"(:root\s*{)" ), "html{" );
+
   for ( ;; ) {
-    if ( currentPos >= css.length() )
+    if ( currentPos >= css.length() ) {
       break;
+    }
     QChar ch = css[ currentPos ];
 
     if ( ch == '@' ) {
@@ -409,8 +404,9 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
         // Copy rule as is.
         n      = css.indexOf( ';', currentPos );
         int n2 = css.indexOf( '{', currentPos );
-        if ( n2 > 0 && n > n2 )
+        if ( n2 > 0 && n > n2 ) {
           n = n2 - 1;
+        }
       }
       else if ( css.mid( currentPos, 6 ).compare( "@media", Qt::CaseInsensitive ) == 0 ) {
         // We must to parse it content to isolate it.
@@ -420,8 +416,9 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
       else if ( css.mid( currentPos, 5 ).compare( "@page", Qt::CaseInsensitive ) == 0 ) {
         // Don't copy rule. GD use own page layout.
         n = css.indexOf( '}', currentPos );
-        if ( n < 0 )
+        if ( n < 0 ) {
           break;
+        }
         currentPos = n + 1;
         continue;
       }
@@ -432,8 +429,9 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
 
       newCSS.append( css.mid( currentPos, n < 0 ? n : n - currentPos + 1 ) );
 
-      if ( n < 0 )
+      if ( n < 0 ) {
         break;
+      }
 
       currentPos = n + 1;
       continue;
@@ -445,8 +443,9 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
 
       int n = css.indexOf( '}', currentPos );
       newCSS.append( css.mid( currentPos, n == -1 ? n : n - currentPos + 1 ) );
-      if ( n < 0 )
+      if ( n < 0 ) {
         break;
+      }
       currentPos = n + 1;
       continue;
     }
@@ -457,8 +456,10 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
         QChar chr;
         for ( int i = currentPos; i < css.length(); i++ ) {
           chr = css[ i ];
-          if ( chr.isLetterOrNumber() || chr.isMark() || chr == '_' || chr == '-' || ( chr == '*' && i == currentPos ) )
+          if ( chr.isLetterOrNumber() || chr.isMark() || chr == '_' || chr == '-'
+               || ( chr == '*' && i == currentPos ) ) {
             continue;
+          }
 
           if ( chr == '|' ) {
             // Namespace prefix found, copy it as is
@@ -467,8 +468,9 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
           }
           break;
         }
-        if ( chr == '|' )
+        if ( chr == '|' ) {
           continue;
+        }
       }
 
       // This is some selector.
@@ -493,8 +495,9 @@ void Class::isolateCSS( QString & css, QString const & wrapperSelector )
       n = css.indexOf( reg3, currentPos );
       s = css.mid( currentPos, n < 0 ? n : n - currentPos );
       newCSS.append( s );
-      if ( n < 0 )
+      if ( n < 0 ) {
         break;
+      }
       currentPos = n;
       continue;
     }
@@ -518,8 +521,9 @@ string makeDictionaryId( vector< string > const & dictionaryFiles ) noexcept
     for ( const auto & full : dictionaryFiles ) {
       QFileInfo fileInfo( QString::fromStdString( full ) );
 
-      if ( fileInfo.isAbsolute() )
+      if ( fileInfo.isAbsolute() ) {
         sortedList.push_back( dictionariesDir.relativeFilePath( fileInfo.filePath() ).toStdString() );
+      }
       else {
         // Well, it's relative. We don't technically support those, but
         // what the heck
@@ -527,15 +531,17 @@ string makeDictionaryId( vector< string > const & dictionaryFiles ) noexcept
       }
     }
   }
-  else
+  else {
     sortedList = dictionaryFiles;
+  }
 
   std::sort( sortedList.begin(), sortedList.end() );
 
   QCryptographicHash hash( QCryptographicHash::Md5 );
 
   for ( const auto & i : sortedList ) {
-    hash.addData( i.c_str(), i.size() + 1 );
+    // Note: a null byte at the end is a must
+    hash.addData( { i.c_str(), static_cast< qsizetype >( i.size() + 1 ) } );
   }
 
   return hash.result().toHex().data();
@@ -554,30 +560,35 @@ bool needToRebuildIndex( vector< string > const & dictionaryFiles, string const 
     QFileInfo fileInfo( name );
     unsigned long ts;
 
-    if ( fileInfo.isDir() )
+    if ( fileInfo.isDir() ) {
       continue;
+    }
 
     if ( name.toLower().endsWith( ".zip" ) ) {
       ZipFile::SplitZipFile zf( name );
-      if ( !zf.exists() )
+      if ( !zf.exists() ) {
         return true;
+      }
       ts = zf.lastModified().toSecsSinceEpoch();
     }
     else {
-      if ( !fileInfo.exists() )
+      if ( !fileInfo.exists() ) {
         continue;
+      }
       ts = fileInfo.lastModified().toSecsSinceEpoch();
     }
 
-    if ( ts > lastModified )
+    if ( ts > lastModified ) {
       lastModified = ts;
+    }
   }
 
 
   QFileInfo fileInfo( indexFile.c_str() );
 
-  if ( !fileInfo.exists() )
+  if ( !fileInfo.exists() ) {
     return true;
+  }
 
   return fileInfo.lastModified().toSecsSinceEpoch() < lastModified;
 }
@@ -599,8 +610,9 @@ QMap< std::string, sptr< Dictionary::Class > > dictToMap( std::vector< sptr< Dic
 {
   QMap< std::string, sptr< Dictionary::Class > > dictMap;
   for ( auto & dict : dicts ) {
-    if ( !dict )
+    if ( !dict ) {
       continue;
+    }
     dictMap.insert( dict.get()->getId(), dict );
   }
   return dictMap;

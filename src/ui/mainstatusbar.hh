@@ -1,8 +1,7 @@
 /* This file is (c) 2012 Tvangeste <i.4m.l33t@yandex.ru>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef MAINSTATUSBAR_HH
-#define MAINSTATUSBAR_HH
+#pragma once
 
 #include <QWidget>
 #include <QLabel>
@@ -25,7 +24,7 @@ public slots:
   void setBackgroundMessage( QString const & message );
 
 protected:
-  virtual void mousePressEvent( QMouseEvent * event );
+  void mousePressEvent( QMouseEvent * event ) override;
 
 private:
   // component to display a small picture
@@ -35,10 +34,8 @@ private:
   QLabel * textWidget;
 
   QTimer * timer;
-  QString backgroungMessage;
+  QString backgroundMessage;
   QString message;
 
-  bool eventFilter( QObject * obj, QEvent * event );
+  bool eventFilter( QObject * obj, QEvent * event ) override;
 };
-
-#endif // MAINSTATUSBAR_HH

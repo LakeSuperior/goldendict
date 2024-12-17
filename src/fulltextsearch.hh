@@ -1,24 +1,10 @@
-#ifndef __FULLTEXTSEARCH_HH_INCLUDED__
-#define __FULLTEXTSEARCH_HH_INCLUDED__
+#pragma once
 
-#include <QAbstractListModel>
-#include <QAction>
-#include <QList>
 #include <QTimer>
-#include <QThread>
 #include <QRunnable>
 #include <QSemaphore>
-#include <QStringList>
-
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
-  #include <QtCore5Compat/QRegExp>
-#else
-  #include <QRegExp>
-#endif
-
 #include "dict/dictionary.hh"
 #include "ui_fulltextsearch.h"
-
 #include "config.hh"
 #include "instances.hh"
 #include "delegate.hh"
@@ -212,7 +198,7 @@ class FullTextSearchDialog: public QDialog
 
   FtsIndexing & ftsIdx;
 
-  QRegExp searchRegExp;
+  QRegularExpression searchRegExp;
   int matchedCount;
 
 public:
@@ -258,12 +244,10 @@ private slots:
 signals:
   void showTranslationFor( QString const &,
                            QStringList const & dictIDs,
-                           QRegExp const & searchRegExp,
+                           QRegularExpression const & searchRegExp,
                            bool ignoreDiacritics );
   void closeDialog();
 };
 
 
 } // namespace FTS
-
-#endif // __FULLTEXTSEARCH_HH_INCLUDED__

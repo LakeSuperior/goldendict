@@ -6,39 +6,28 @@
 #include "btreeidx.hh"
 
 #include "folding.hh"
-#include "gddebug.hh"
-#include "utf8.hh"
+#include "text.hh"
 #include "decompress.hh"
 #include "langcoder.hh"
-#include "wstring_qt.hh"
 #include "ftshelpers.hh"
 #include "htmlescape.hh"
 #include "filetype.hh"
 #include "tiff.hh"
 #include "utils.hh"
-
-#ifdef _MSC_VER
-  #include <stub_msvc.h>
-#endif
-
+#include "iconv.hh"
 #include <QString>
+#include <QStringBuilder>
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
-#include <QTextCodec>
 #include <QMap>
-#include <QPair>
-#include <QRegExp>
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
-  #include <QtCore5Compat>
-#endif
 #include <QProcess>
-#include <QVector>
-
+#include <QList>
+#include <QtEndian>
 #include <QRegularExpression>
-
 #include <string>
 #include <vector>
+#include <utility>
 #include <map>
 #include <set>
 #include <algorithm>
@@ -51,26 +40,26 @@ using std::vector;
 using std::multimap;
 using std::pair;
 using std::set;
-using gd::wstring;
 
 using BtreeIndexing::WordArticleLink;
 using BtreeIndexing::IndexedWords;
 using BtreeIndexing::IndexInfo;
 
 DEF_EX_STR( exNotSlobFile, "Not an Slob file", Dictionary::Ex )
+DEF_EX( exTruncateFile, "Slob file truncated", Dictionary::Ex )
 using Dictionary::exCantReadFile;
 DEF_EX_STR( exCantDecodeFile, "Can't decode file", Dictionary::Ex )
 DEF_EX_STR( exNoCodecFound, "No text codec found", Dictionary::Ex )
 DEF_EX( exUserAbort, "User abort", Dictionary::Ex )
 DEF_EX( exNoResource, "No resource found", Dictionary::Ex )
 
-  #pragma pack( push, 1 )
 
 enum {
   Signature            = 0x58424C53, // SLBX on little-endian, XBLS on big-endian
   CurrentFormatVersion = 2 + BtreeIndexing::FormatVersion + Folding::Version
 };
 
+#pragma pack( push, 1 )
 struct IdxHeader
 {
   quint32 signature;             // First comes the signature, SLBX
@@ -83,13 +72,9 @@ struct IdxHeader
   quint32 articleCount;
   quint32 langFrom; // Source language
   quint32 langTo;   // Target language
-}
-  #ifndef _MSC_VER
-__attribute__( ( packed ) )
-  #endif
-;
-
-  #pragma pack( pop )
+};
+static_assert( alignof( IdxHeader ) == 1 );
+#pragma pack( pop )
 
 const char SLOB_MAGIC[ 8 ] = { 0x21, 0x2d, 0x31, 0x53, 0x4c, 0x4f, 0x42, 0x1f };
 
@@ -103,7 +88,7 @@ struct RefEntry
 
 bool indexIsOldOrBad( string const & indexFile )
 {
-  File::Class idx( indexFile, "rb" );
+  File::Index idx( indexFile, QIODevice::ReadOnly );
 
   IdxHeader header;
 
@@ -115,8 +100,8 @@ bool indexIsOldOrBad( string const & indexFile )
 class SlobFile
 {
 public:
-  typedef QPair< quint64, quint32 > RefEntryOffsetItem;
-  typedef QVector< RefEntryOffsetItem > RefOffsetsVector;
+  using RefEntryOffsetItem = std::pair< quint64, quint32 >;
+  using RefOffsetsVector   = QList< RefEntryOffsetItem >;
 
 private:
   enum Compressions {
@@ -130,11 +115,10 @@ private:
   QFile file;
   QString fileName, dictionaryName;
   Compressions compression;
-  QString encoding;
+  std::string encoding;
   unsigned char uuid[ 16 ];
-  QTextCodec * codec;
   QMap< QString, QString > tags;
-  QVector< QString > contentTypes;
+  QList< QString > contentTypes;
   quint32 blobCount;
   quint64 storeOffset, fileSize, refsOffset;
   quint32 refsCount, itemsCount;
@@ -152,7 +136,6 @@ private:
 public:
   SlobFile():
     compression( UNKNOWN ),
-    codec( 0 ),
     blobCount( 0 ),
     storeOffset( 0 ),
     fileSize( 0 ),
@@ -173,7 +156,7 @@ public:
     return compression;
   }
 
-  QString const & getEncoding() const
+  std::string const & getEncoding() const
   {
     return encoding;
   }
@@ -201,11 +184,6 @@ public:
   quint32 getContentTypesCount() const
   {
     return contentTypesCount;
-  }
-
-  QTextCodec * getCodec() const
-  {
-    return codec;
   }
 
   const RefOffsetsVector & getSortedRefOffsets();
@@ -244,15 +222,23 @@ QString SlobFile::readString( unsigned length )
   QByteArray data = file.read( length );
   QString str;
 
-  if ( codec != 0 && !data.isEmpty() )
-    str = codec->toUnicode( data );
-  else
+  if ( !encoding.empty() && !data.isEmpty() ) {
+    try {
+      str = Iconv::toQString( encoding.c_str(), data.data(), data.size() );
+    }
+    catch ( Iconv::Ex & e ) {
+      qDebug() << QString( R"(slob decoding failed: %1)" ).arg( e.what() );
+    }
+  }
+  else {
     str = QString( data );
+  }
 
   char term = 0;
   int n     = str.indexOf( term );
-  if ( n >= 0 )
+  if ( n >= 0 ) {
     str.resize( n );
+  }
 
   return str;
 }
@@ -291,8 +277,9 @@ void SlobFile::open( const QString & name )
 {
   QString error( name + ": " );
 
-  if ( file.isOpen() )
+  if ( file.isOpen() ) {
     file.close();
+  }
 
   fileName = name;
 
@@ -305,61 +292,66 @@ void SlobFile::open( const QString & name )
 
   for ( ;; ) {
 
-    if ( !file.open( QFile::ReadOnly ) )
+    if ( !file.open( QFile::ReadOnly ) ) {
       break;
+    }
 
     char magic[ 8 ];
-    if ( file.read( magic, sizeof( magic ) ) != sizeof( magic ) )
+    if ( file.read( magic, sizeof( magic ) ) != sizeof( magic ) ) {
       break;
+    }
 
-    if ( memcmp( magic, SLOB_MAGIC, sizeof( magic ) ) != 0 )
+    if ( memcmp( magic, SLOB_MAGIC, sizeof( magic ) ) != 0 ) {
       throw exNotSlobFile( string( name.toUtf8().data() ) );
+    }
 
-    if ( file.read( (char *)uuid, sizeof( uuid ) ) != sizeof( uuid ) )
+    if ( file.read( (char *)uuid, sizeof( uuid ) ) != sizeof( uuid ) ) {
       break;
+    }
 
     // Read encoding
 
-    encoding = readTinyText();
-
-    codec = QTextCodec::codecForName( encoding.toLatin1() );
-    if ( codec == 0 ) {
-      error = QString( "for encoding \"" ) + encoding + "\"";
-      throw exNoCodecFound( string( error.toUtf8().data() ) );
-    }
+    encoding = readTinyText().toStdString();
 
     // Read compression type
 
     QString compr = readTinyText();
 
-    if ( compr.compare( "zlib", Qt::CaseInsensitive ) == 0 )
+    if ( compr.compare( "zlib", Qt::CaseInsensitive ) == 0 ) {
       compression = ZLIB;
-    else if ( compr.compare( "bz2", Qt::CaseInsensitive ) == 0 )
+    }
+    else if ( compr.compare( "bz2", Qt::CaseInsensitive ) == 0 ) {
       compression = BZ2;
-    else if ( compr.compare( "lzma2", Qt::CaseInsensitive ) == 0 )
+    }
+    else if ( compr.compare( "lzma2", Qt::CaseInsensitive ) == 0 ) {
       compression = LZMA2;
-    else if ( compr.isEmpty() || compr.compare( "none", Qt::CaseInsensitive ) == 0 )
+    }
+    else if ( compr.isEmpty() || compr.compare( "none", Qt::CaseInsensitive ) == 0 ) {
       compression = NONE;
+    }
 
     // Read tags
 
     unsigned char count;
-    if ( !file.getChar( (char *)&count ) )
+    if ( !file.getChar( (char *)&count ) ) {
       break;
+    }
 
     for ( unsigned i = 0; i < count; i++ ) {
       QString key   = readTinyText();
       QString value = readTinyText();
       tags[ key ]   = value;
 
-      if ( key.compare( "label", Qt::CaseInsensitive ) == 0 || key.compare( "name", Qt::CaseInsensitive ) == 0 )
+      if ( key.compare( "label", Qt::CaseInsensitive ) == 0 || key.compare( "name", Qt::CaseInsensitive ) == 0 ) {
         dictionaryName = value;
+      }
     }
 
     // Read content types
 
-    if ( !file.getChar( (char *)&count ) )
+    if ( !file.getChar( (char *)&count ) ) {
       break;
+    }
 
     for ( unsigned i = 0; i < count; i++ ) {
       QString type = readText();
@@ -370,30 +362,41 @@ void SlobFile::open( const QString & name )
     // Read data parameters
 
     quint32 cnt;
-    if ( file.read( (char *)&cnt, sizeof( cnt ) ) != sizeof( cnt ) )
+    if ( file.read( (char *)&cnt, sizeof( cnt ) ) != sizeof( cnt ) ) {
       break;
+    }
     blobCount = qFromBigEndian( cnt );
 
     quint64 tmp;
-    if ( file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) )
+    if ( file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) ) {
       break;
+    }
     storeOffset = qFromBigEndian( tmp );
 
-    if ( file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) )
+    if ( file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) ) {
       break;
+    }
     fileSize = qFromBigEndian( tmp );
 
-    if ( file.read( (char *)&cnt, sizeof( cnt ) ) != sizeof( cnt ) )
+    //truncated file
+    if ( file.size() < fileSize ) {
+      throw exTruncateFile();
+    }
+
+    if ( file.read( (char *)&cnt, sizeof( cnt ) ) != sizeof( cnt ) ) {
       break;
+    }
     refsCount = qFromBigEndian( cnt );
 
     refsOffset = file.pos();
 
-    if ( !file.seek( storeOffset ) )
+    if ( !file.seek( storeOffset ) ) {
       break;
+    }
 
-    if ( file.read( (char *)&cnt, sizeof( cnt ) ) != sizeof( cnt ) )
+    if ( file.read( (char *)&cnt, sizeof( cnt ) ) != sizeof( cnt ) ) {
       break;
+    }
     itemsCount = qFromBigEndian( cnt );
 
     itemsOffset     = storeOffset + sizeof( itemsCount );
@@ -418,8 +421,9 @@ const SlobFile::RefOffsetsVector & SlobFile::getSortedRefOffsets()
     QByteArray offsets;
     offsets.resize( size );
 
-    if ( !file.seek( refsOffset ) || file.read( offsets.data(), size ) != size )
+    if ( !file.seek( refsOffset ) || file.read( offsets.data(), size ) != size ) {
       break;
+    }
 
     for ( quint32 i = 0; i < refsCount; i++ ) {
       memcpy( &tmp, offsets.data() + i * sizeof( quint64 ), sizeof( tmp ) );
@@ -436,19 +440,22 @@ const SlobFile::RefOffsetsVector & SlobFile::getSortedRefOffsets()
 void SlobFile::getRefEntryAtOffset( quint64 offset, RefEntry & entry )
 {
   for ( ;; ) {
-    if ( !file.seek( offset ) )
+    if ( !file.seek( offset ) ) {
       break;
+    }
 
     entry.key = readText();
 
     quint32 index;
-    if ( file.read( (char *)&index, sizeof( index ) ) != sizeof( index ) )
+    if ( file.read( (char *)&index, sizeof( index ) ) != sizeof( index ) ) {
       break;
+    }
     entry.itemIndex = qFromBigEndian( index );
 
     quint16 binIndex;
-    if ( file.read( (char *)&binIndex, sizeof( binIndex ) ) != sizeof( binIndex ) )
+    if ( file.read( (char *)&binIndex, sizeof( binIndex ) ) != sizeof( binIndex ) ) {
       break;
+    }
     entry.binIndex = qFromBigEndian( binIndex );
 
     entry.fragment = readTinyText();
@@ -465,8 +472,9 @@ void SlobFile::getRefEntry( quint32 ref_nom, RefEntry & entry )
   quint64 offset, tmp;
 
   for ( ;; ) {
-    if ( !file.seek( pos ) || file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) )
+    if ( !file.seek( pos ) || file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) ) {
       break;
+    }
 
     offset = qFromBigEndian( tmp ) + refsOffset + refsCount * sizeof( quint64 );
 
@@ -486,51 +494,62 @@ quint8 SlobFile::getItem( RefEntry const & entry, string * data )
   for ( ;; ) {
     // Read item data types
 
-    if ( !file.seek( pos ) || file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) )
+    if ( !file.seek( pos ) || file.read( (char *)&tmp, sizeof( tmp ) ) != sizeof( tmp ) ) {
       break;
+    }
 
     offset = qFromBigEndian( tmp ) + itemsDataOffset;
 
-    if ( !file.seek( offset ) )
+    if ( !file.seek( offset ) ) {
       break;
+    }
 
     quint32 bins, bins_be;
-    if ( file.read( (char *)&bins_be, sizeof( bins_be ) ) != sizeof( bins_be ) )
+    if ( file.read( (char *)&bins_be, sizeof( bins_be ) ) != sizeof( bins_be ) ) {
       break;
+    }
     bins = qFromBigEndian( bins_be );
 
-    if ( entry.binIndex >= bins )
+    if ( entry.binIndex >= bins ) {
       return 0xFF;
+    }
 
-    QVector< quint8 > ids;
+    QList< quint8 > ids;
     ids.resize( bins );
-    if ( file.read( (char *)ids.data(), bins ) != bins )
+    if ( file.read( (char *)ids.data(), bins ) != bins ) {
       break;
+    }
 
     quint8 id = ids[ entry.binIndex ];
 
-    if ( id >= (unsigned)contentTypes.size() )
+    if ( id >= (unsigned)contentTypes.size() ) {
       return 0xFF;
+    }
 
     if ( data != 0 ) {
       // Read item data
       if ( currentItem != entry.itemIndex ) {
         currentItemData.clear();
         quint32 length, length_be;
-        if ( file.read( (char *)&length_be, sizeof( length_be ) ) != sizeof( length_be ) )
+        if ( file.read( (char *)&length_be, sizeof( length_be ) ) != sizeof( length_be ) ) {
           break;
+        }
         length = qFromBigEndian( length_be );
 
         QByteArray compressedData = file.read( length );
 
-        if ( compression == NONE )
+        if ( compression == NONE ) {
           currentItemData = string( compressedData.data(), compressedData.length() );
-        else if ( compression == ZLIB )
+        }
+        else if ( compression == ZLIB ) {
           currentItemData = decompressZlib( compressedData.data(), length );
-        else if ( compression == BZ2 )
+        }
+        else if ( compression == BZ2 ) {
           currentItemData = decompressBzip2( compressedData.data(), length );
-        else
+        }
+        else {
           currentItemData = decompressLzma2( compressedData.data(), length, true );
+        }
 
         if ( currentItemData.empty() ) {
           currentItem = 0xFFFFFFFF;
@@ -544,8 +563,9 @@ quint8 SlobFile::getItem( RefEntry const & entry, string * data )
       const char * ptr = currentItemData.c_str();
       quint32 pos      = entry.binIndex * sizeof( quint32 );
 
-      if ( pos >= currentItemData.length() - sizeof( quint32 ) )
+      if ( pos >= currentItemData.length() - sizeof( quint32 ) ) {
         return 0xFF;
+      }
 
       quint32 offset, offset_be;
       memcpy( &offset_be, ptr + pos, sizeof( offset_be ) );
@@ -553,8 +573,9 @@ quint8 SlobFile::getItem( RefEntry const & entry, string * data )
 
       pos = bins * sizeof( quint32 ) + offset;
 
-      if ( pos >= currentItemData.length() - sizeof( quint32 ) )
+      if ( pos >= currentItemData.length() - sizeof( quint32 ) ) {
         return 0xFF;
+      }
 
       quint32 length, len_be;
       memcpy( &len_be, ptr + pos, sizeof( len_be ) );
@@ -575,11 +596,10 @@ class SlobDictionary: public BtreeIndexing::BtreeDictionary
 {
   QMutex idxMutex;
   QMutex slobMutex, idxResourceMutex;
-  File::Class idx;
+  File::Index idx;
   BtreeIndex resourceIndex;
   IdxHeader idxHeader;
   SlobFile sf;
-  QString texCgiPath, texCachePath;
 
   string idxFileName;
 
@@ -588,16 +608,6 @@ public:
   SlobDictionary( string const & id, string const & indexFile, vector< string > const & dictionaryFiles );
 
   ~SlobDictionary();
-
-  string getName() noexcept override
-  {
-    return dictionaryName;
-  }
-
-  map< Dictionary::Property, string > getProperties() noexcept override
-  {
-    return map< Dictionary::Property, string >();
-  }
 
   unsigned long getArticleCount() noexcept override
   {
@@ -619,8 +629,10 @@ public:
     return idxHeader.langTo;
   }
 
-  sptr< Dictionary::DataRequest >
-  getArticle( wstring const &, vector< wstring > const & alts, wstring const &, bool ignoreDiacritics ) override;
+  sptr< Dictionary::DataRequest > getArticle( std::u32string const &,
+                                              vector< std::u32string > const & alts,
+                                              std::u32string const &,
+                                              bool ignoreDiacritics ) override;
 
   sptr< Dictionary::DataRequest > getResource( string const & name ) override;
 
@@ -635,13 +647,17 @@ public:
 
   quint64 getArticlePos( uint32_t articleNumber );
 
-  void sortArticlesOffsetsForFTS( QVector< uint32_t > & offsets, QAtomicInt & isCancelled ) override;
-  void makeFTSIndex( QAtomicInt & isCancelled, bool firstIteration ) override;
+  void makeFTSIndex( QAtomicInt & isCancelled ) override;
 
   void setFTSParameters( Config::FullTextSearch const & fts ) override
   {
-    can_FTS = enable_FTS && fts.enabled && !fts.disabledTypes.contains( "SLOB", Qt::CaseInsensitive )
-      && ( fts.maxDictionarySize == 0 || getArticleCount() <= fts.maxDictionarySize );
+    if ( metadata_enable_fts.has_value() ) {
+      can_FTS = fts.enabled && metadata_enable_fts.value();
+    }
+    else {
+      can_FTS = fts.enabled && !fts.disabledTypes.contains( "SLOB", Qt::CaseInsensitive )
+        && ( fts.maxDictionarySize == 0 || getArticleCount() <= fts.maxDictionarySize );
+    }
   }
 
   uint32_t getFtsIndexVersion() override
@@ -669,17 +685,11 @@ private:
 SlobDictionary::SlobDictionary( string const & id, string const & indexFile, vector< string > const & dictionaryFiles ):
   BtreeDictionary( id, dictionaryFiles ),
   idxFileName( indexFile ),
-  idx( indexFile, "rb" ),
+  idx( indexFile, QIODevice::ReadOnly ),
   idxHeader( idx.read< IdxHeader >() )
 {
   // Open data file
-
-  try {
-    sf.open( dictionaryFiles[ 0 ].c_str() );
-  }
-  catch ( std::exception & e ) {
-    gdWarning( "Slob dictionary initializing failed: %s, error: %s\n", dictionaryFiles[ 0 ].c_str(), e.what() );
-  }
+  sf.open( dictionaryFiles[ 0 ].c_str() );
 
   // Initialize the indexes
 
@@ -701,27 +711,15 @@ SlobDictionary::SlobDictionary( string const & id, string const & indexFile, vec
   // Full-text search parameters
 
   ftsIdxName = indexFile + Dictionary::getFtsSuffix();
-
-  texCgiPath = Config::getProgramDataDir() + "/mimetex.cgi";
-  if ( QFileInfo( texCgiPath ).exists() ) {
-    QString dirName = QString::fromStdString( getId() );
-    QDir( QDir::tempPath() ).mkdir( dirName );
-    texCachePath = QDir::tempPath() + "/" + dirName;
-  }
-  else
-    texCgiPath.clear();
 }
 
-SlobDictionary::~SlobDictionary()
-{
-  if ( !texCachePath.isEmpty() )
-    Utils::Fs::removeDirectory( texCachePath );
-}
+SlobDictionary::~SlobDictionary() {}
 
 void SlobDictionary::loadIcon() noexcept
 {
-  if ( dictionaryIconLoaded )
+  if ( dictionaryIconLoaded ) {
     return;
+  }
 
   QString fileName = QDir::fromNativeSeparators( getDictionaryFilenames()[ 0 ].c_str() );
 
@@ -738,17 +736,12 @@ void SlobDictionary::loadIcon() noexcept
 
 QString const & SlobDictionary::getDescription()
 {
-  if ( !dictionaryDescription.isEmpty() )
+  if ( !dictionaryDescription.isEmpty() ) {
     return dictionaryDescription;
+  }
 
-  QMap< QString, QString > const & tags = sf.getTags();
-
-  QMap< QString, QString >::const_iterator it;
-  for ( it = tags.begin(); it != tags.end(); ++it ) {
-    if ( it != tags.begin() )
-      dictionaryDescription += "\n\n";
-
-    dictionaryDescription += it.key() + ": " + it.value();
+  for ( auto [ key, value ] : sf.getTags().asKeyValueRange() ) {
+    dictionaryDescription += "<b>" % key % "</b>" % ": " % value % "<br>";
   }
 
   return dictionaryDescription;
@@ -765,15 +758,17 @@ void SlobDictionary::loadArticle( quint32 address, string & articleText )
   if ( !articleText.empty() ) {
     articleText = convert( articleText, entry );
   }
-  else
+  else {
     articleText = QObject::tr( "Article decoding error" ).toStdString();
+  }
 
   // See Issue #271: A mechanism to clean-up invalid HTML cards.
   string cleaner = Utils::Html::getHtmlCleaner();
 
   string prefix( "<div class=\"slobdict\"" );
-  if ( isToLanguageRTL() )
+  if ( isToLanguageRTL() ) {
     prefix += " dir=\"rtl\"";
+  }
   prefix += ">";
 
   articleText = prefix + articleText + cleaner + "</div>";
@@ -806,13 +801,15 @@ string SlobDictionary::convert( const string & in, RefEntry const & entry )
     pos = match.capturedEnd();
 
     QStringList list = match.capturedTexts();
-    // Add empty strings for compatibility with QRegExp behaviour
-    for ( int i = match.lastCapturedIndex() + 1; i < 5; i++ )
+    // Add empty strings for compatibility with regex behaviour
+    for ( int i = match.lastCapturedIndex() + 1; i < 5; i++ ) {
       list.append( QString() );
+    }
 
     QString tag = list[ 3 ];
-    if ( !list[ 4 ].isEmpty() )
+    if ( !list[ 4 ].isEmpty() ) {
       tag = list[ 4 ].split( "\"" )[ 1 ];
+    }
 
     // Find anchor
     int n = list[ 3 ].indexOf( '#' );
@@ -820,8 +817,9 @@ string SlobDictionary::convert( const string & in, RefEntry const & entry )
       anchor = QString( "?gdanchor=" ) + list[ 3 ].mid( n + 1 );
       tag.remove( list[ 3 ].mid( n ) );
     }
-    else
+    else {
       anchor.clear();
+    }
 
     tag.remove( QRegularExpression( ".*/" ) )
       .remove( QRegularExpression( "\\.(s|)htm(l|)$", QRegularExpression::PatternOption::CaseInsensitiveOption ) )
@@ -837,142 +835,13 @@ string SlobDictionary::convert( const string & in, RefEntry const & entry )
   }
   newText.clear();
 
-
-  // Handle TeX formulas via mimetex.cgi
-
-  if ( !texCgiPath.isEmpty() ) {
-    QRegularExpression texImage( R"lit(<\s*img\s+class="([^"]+)"\s*([^>]*)alt="([^"]+)"[^>]*>)lit" );
-    QRegularExpression regFrac( "\\\\[dt]frac" );
-    QRegularExpression regSpaces( R"(\s+([\{\(\[\}\)\]]))" );
-
-    QRegExp multReg( R"(\*\{(\d+)\}([^\{]|\{([^\}]+)\}))", Qt::CaseSensitive, QRegExp::RegExp2 );
-
-    QString arrayDesc( "\\begin{array}{" );
-    pos               = 0;
-    unsigned texCount = 0;
-    QString imgName;
-
-    QRegularExpressionMatchIterator it = texImage.globalMatch( text );
-    QString newText;
-    while ( it.hasNext() ) {
-      QRegularExpressionMatch match = it.next();
-
-      newText += text.mid( pos, match.capturedStart() - pos );
-      pos = match.capturedEnd();
-
-      QStringList list = match.capturedTexts();
-
-
-      if ( list[ 1 ].compare( "tex" ) == 0 || list[ 1 ].compare( "mwe-math-fallback-image-inline" ) == 0
-           || list[ 1 ].endsWith( " tex" ) ) {
-        QString name;
-        name    = name.asprintf( "%04X%04X%04X.gif", entry.itemIndex, entry.binIndex, texCount );
-        imgName = texCachePath + "/" + name;
-
-        if ( !QFileInfo( imgName ).exists() ) {
-
-          // Replace some TeX commands which don't support by mimetex.cgi
-
-          QString tex = list[ 3 ];
-          tex.replace( regSpaces, "\\1" );
-          tex.replace( regFrac, "\\frac" );
-          tex.replace( "\\leqslant", "\\leq" );
-          tex.replace( "\\geqslant", "\\geq" );
-          tex.replace( "\\infin", "\\infty" );
-          tex.replace( "\\iff", "\\Longleftrightarrow" );
-          tex.replace( "\\tbinom", "\\binom" );
-          tex.replace( "\\implies", "\\Longrightarrow" );
-          tex.replace( "{aligned}", "{align*}" );
-          tex.replace( "\\Subset", "\\subset" );
-          tex.replace( "\\xrightarrow", "\\longrightarrow^" );
-          tex.remove( "\\scriptstyle" );
-          tex.remove( "\\mathop" );
-          tex.replace( "\\bigg|", "|" );
-
-          // Format array descriptions (mimetex now don't support *{N}x constructions in it)
-
-          int pos1 = 0;
-          while ( pos1 >= 0 ) {
-            pos1 = tex.indexOf( arrayDesc, pos1, Qt::CaseInsensitive );
-            if ( pos1 >= 0 ) {
-              // Retrieve array description
-              QString desc, newDesc;
-              int n      = 0;
-              int nstart = pos1 + arrayDesc.size();
-              int i;
-              for ( i = 0; i + nstart < tex.size(); i++ ) {
-                if ( tex[ i + nstart ] == '{' )
-                  n += 1;
-                if ( tex[ i + nstart ] == '}' )
-                  n -= 1;
-                if ( n < 0 )
-                  break;
-              }
-              if ( i > 0 && i + nstart + 1 < tex.size() )
-                desc = tex.mid( nstart, i );
-
-              if ( !desc.isEmpty() ) {
-                // Expand multipliers: "*{5}x" -> "xxxxx"
-
-                newDesc = desc;
-                QString newStr;
-                int pos2 = 0;
-                while ( pos2 >= 0 ) {
-                  pos2 = multReg.indexIn( newDesc, pos2 );
-                  if ( pos2 >= 0 ) {
-                    QStringList list = multReg.capturedTexts();
-                    int n            = list[ 1 ].toInt();
-                    for ( int i = 0; i < n; i++ )
-                      newStr += list[ 3 ].isEmpty() ? list[ 2 ] : list[ 3 ];
-                    newDesc.replace( pos2, list[ 0 ].size(), newStr );
-                    pos2 += newStr.size();
-                  }
-                  else
-                    break;
-                }
-                tex.replace( pos1 + arrayDesc.size(), desc.size(), newDesc );
-                pos1 += arrayDesc.size() + newDesc.size();
-              }
-              else
-                pos1 += arrayDesc.size();
-            }
-            else
-              break;
-          }
-
-          QString command = texCgiPath + " -e " + imgName + " \"" + tex + "\"";
-          QProcess::execute( command, QStringList() );
-        }
-
-        QString tag = QString( R"(<img class="imgtex" src="file://)" )
-  #ifdef Q_OS_WIN32
-          + "/"
-  #endif
-          + imgName + "\" alt=\"" + list[ 3 ] + "\">";
-
-        newText += tag;
-
-
-        texCount += 1;
-      }
-      else
-        newText += list[ 0 ];
-    }
-    if ( pos ) {
-      newText += text.mid( pos );
-      text = newText;
-    }
-    newText.clear();
-  }
-  #ifdef Q_OS_WIN32
-  else {
-    // Increase equations scale
-    text = QString::fromLatin1( "<script type=\"text/x-mathjax-config\">MathJax.Hub.Config({" )
-      + " SVG: { scale: 170, linebreaks: { automatic:true } }"
-      + ", \"HTML-CSS\": { scale: 210, linebreaks: { automatic:true } }"
-      + ", CommonHTML: { scale: 210, linebreaks: { automatic:true } }" + " });</script>" + text;
-  }
-  #endif
+#ifdef Q_OS_WIN32
+  // Increase equations scale
+  text = QString::fromLatin1( "<script type=\"text/x-mathjax-config\">MathJax.Hub.Config({" )
+    + " SVG: { scale: 170, linebreaks: { automatic:true } }"
+    + ", \"HTML-CSS\": { scale: 210, linebreaks: { automatic:true } }"
+    + ", CommonHTML: { scale: 210, linebreaks: { automatic:true } }" + " });</script>" + text;
+#endif
 
   // Fix outstanding elements
   text += "<br style=\"clear:both;\" />";
@@ -985,10 +854,11 @@ void SlobDictionary::loadResource( std::string & resourceName, string & data )
   vector< WordArticleLink > link;
   RefEntry entry;
 
-  link = resourceIndex.findArticles( Utf8::decode( resourceName ) );
+  link = resourceIndex.findArticles( Text::toUtf32( resourceName ) );
 
-  if ( link.empty() )
+  if ( link.empty() ) {
     return;
+  }
 
   readArticle( link[ 0 ].articleOffset, data, entry );
 }
@@ -1000,13 +870,15 @@ quint32 SlobDictionary::readArticle( quint32 articleNumber, std::string & result
 
   {
     QMutexLocker _( &slobMutex );
-    if ( entry.key.isEmpty() )
+    if ( entry.key.isEmpty() ) {
       sf.getRefEntry( articleNumber, entry );
+    }
     contentId = sf.getItem( entry, &data );
   }
 
-  if ( contentId == 0xFF )
+  if ( contentId == 0xFF ) {
     return 0xFFFFFFFF;
+  }
 
   QString contentType = sf.getContentType( contentId );
 
@@ -1015,12 +887,19 @@ quint32 SlobDictionary::readArticle( quint32 articleNumber, std::string & result
        || contentType.contains( "/css", Qt::CaseInsensitive )
        || contentType.contains( "/javascript", Qt::CaseInsensitive )
        || contentType.contains( "/json", Qt::CaseInsensitive ) ) {
-    QTextCodec * codec = sf.getCodec();
-    QString content    = codec->toUnicode( data.c_str(), data.size() );
-    result             = string( content.toUtf8().data() );
+    QString content;
+    try {
+      content = Iconv::toQString( sf.getEncoding().c_str(), data.data(), data.size() );
+    }
+    catch ( Iconv::Ex & e ) {
+      qDebug() << QString( R"(slob decoding failed: %1)" ).arg( e.what() );
+    }
+
+    result = string( content.toUtf8().data() );
   }
-  else
+  else {
     result = data;
+  }
 
   return contentId;
 }
@@ -1035,27 +914,23 @@ quint64 SlobDictionary::getArticlePos( uint32_t articleNumber )
   return ( ( (quint64)( entry.binIndex ) ) << 32 ) | entry.itemIndex;
 }
 
-void SlobDictionary::sortArticlesOffsetsForFTS( QVector< uint32_t > & offsets, QAtomicInt & isCancelled )
-{
-  //Currently , we use xapian to create the fulltext index. The order of offsets is no important.
-}
-
-void SlobDictionary::makeFTSIndex( QAtomicInt & isCancelled, bool firstIteration )
+void SlobDictionary::makeFTSIndex( QAtomicInt & isCancelled )
 {
   if ( !( Dictionary::needToRebuildIndex( getDictionaryFilenames(), ftsIdxName )
-          || FtsHelpers::ftsIndexIsOldOrBad( this ) ) )
+          || FtsHelpers::ftsIndexIsOldOrBad( this ) ) ) {
     FTS_index_completed.ref();
+  }
 
-  if ( haveFTSIndex() )
+  if ( haveFTSIndex() ) {
     return;
+  }
 
-  if ( !ensureInitDone().empty() )
+  if ( !ensureInitDone().empty() ) {
     return;
+  }
 
-  if ( firstIteration && getArticleCount() > FTS::MaxDictionarySizeForFastSearch )
-    return;
 
-  gdDebug( "Slob: Building the full-text index for dictionary: %s\n", getName().c_str() );
+  qDebug( "Slob: Building the full-text index for dictionary: %s", getName().c_str() );
 
   try {
     const auto slob_dic = std::make_unique< SlobDictionary >( getId(), idxFileName, getDictionaryFilenames() );
@@ -1063,7 +938,7 @@ void SlobDictionary::makeFTSIndex( QAtomicInt & isCancelled, bool firstIteration
     FTS_index_completed.ref();
   }
   catch ( std::exception & ex ) {
-    gdWarning( "Slob: Failed building full-text search index for \"%s\", reason: %s\n", getName().c_str(), ex.what() );
+    qWarning( "Slob: Failed building full-text search index for \"%s\", reason: %s", getName().c_str(), ex.what() );
     QFile::remove( ftsIdxName.c_str() );
   }
 }
@@ -1088,11 +963,12 @@ void SlobDictionary::getArticleText( uint32_t articleAddress, QString & headword
 
     text = QString::fromUtf8( articleText.data(), articleText.size() );
 
-    if ( type == htmlType )
+    if ( type == htmlType ) {
       text = Html::unescape( text );
+    }
   }
   catch ( std::exception & ex ) {
-    gdWarning( "Slob: Failed retrieving article from \"%s\", reason: %s\n", getName().c_str(), ex.what() );
+    qWarning( "Slob: Failed retrieving article from \"%s\", reason: %s", getName().c_str(), ex.what() );
   }
 }
 
@@ -1114,8 +990,8 @@ SlobDictionary::getSearchResults( QString const & searchString, int searchMode, 
 class SlobArticleRequest: public Dictionary::DataRequest
 {
 
-  wstring word;
-  vector< wstring > alts;
+  std::u32string word;
+  vector< std::u32string > alts;
   SlobDictionary & dict;
   bool ignoreDiacritics;
 
@@ -1124,8 +1000,8 @@ class SlobArticleRequest: public Dictionary::DataRequest
 
 public:
 
-  SlobArticleRequest( wstring const & word_,
-                      vector< wstring > const & alts_,
+  SlobArticleRequest( std::u32string const & word_,
+                      vector< std::u32string > const & alts_,
                       SlobDictionary & dict_,
                       bool ignoreDiacritics_ ):
     word( word_ ),
@@ -1170,15 +1046,16 @@ void SlobArticleRequest::run()
     chain.insert( chain.end(), altChain.begin(), altChain.end() );
   }
 
-  multimap< wstring, pair< string, string > > mainArticles, alternateArticles;
+  multimap< std::u32string, pair< string, string > > mainArticles, alternateArticles;
 
   set< quint64 > articlesIncluded; // Some synonims make it that the articles
                                    // appear several times. We combat this
                                    // by only allowing them to appear once.
 
-  wstring wordCaseFolded = Folding::applySimpleCaseOnly( word );
-  if ( ignoreDiacritics )
+  std::u32string wordCaseFolded = Folding::applySimpleCaseOnly( word );
+  if ( ignoreDiacritics ) {
     wordCaseFolded = Folding::applyDiacriticsOnly( wordCaseFolded );
+  }
 
   for ( auto & x : chain ) {
     if ( Utils::AtomicInt::loadAcquire( isCancelled ) ) {
@@ -1188,8 +1065,9 @@ void SlobArticleRequest::run()
 
     quint64 pos = dict.getArticlePos( x.articleOffset ); // Several "articleOffset" values may refer to one article
 
-    if ( articlesIncluded.find( pos ) != articlesIncluded.end() )
+    if ( articlesIncluded.find( pos ) != articlesIncluded.end() ) {
       continue; // We already have this article in the body.
+    }
 
     // Now grab that article
 
@@ -1207,11 +1085,12 @@ void SlobArticleRequest::run()
 
     // We do the case-folded comparison here.
 
-    wstring headwordStripped = Folding::applySimpleCaseOnly( headword );
-    if ( ignoreDiacritics )
+    std::u32string headwordStripped = Folding::applySimpleCaseOnly( headword );
+    if ( ignoreDiacritics ) {
       headwordStripped = Folding::applyDiacriticsOnly( headwordStripped );
+    }
 
-    multimap< wstring, pair< string, string > > & mapToUse =
+    multimap< std::u32string, pair< string, string > > & mapToUse =
       ( wordCaseFolded == headwordStripped ) ? mainArticles : alternateArticles;
 
     mapToUse.insert( pair( Folding::applySimpleCaseOnly( headword ), pair( headword, articleText ) ) );
@@ -1227,7 +1106,7 @@ void SlobArticleRequest::run()
 
   string result;
 
-  multimap< wstring, pair< string, string > >::const_iterator i;
+  multimap< std::u32string, pair< string, string > >::const_iterator i;
 
   for ( i = mainArticles.begin(); i != mainArticles.end(); ++i ) {
     result += R"(<div class="slobdict"><h3 class="slobdict_headword">)";
@@ -1250,9 +1129,9 @@ void SlobArticleRequest::run()
   finish();
 }
 
-sptr< Dictionary::DataRequest > SlobDictionary::getArticle( wstring const & word,
-                                                            vector< wstring > const & alts,
-                                                            wstring const &,
+sptr< Dictionary::DataRequest > SlobDictionary::getArticle( std::u32string const & word,
+                                                            vector< std::u32string > const & alts,
+                                                            std::u32string const &,
                                                             bool ignoreDiacritics )
 
 {
@@ -1308,8 +1187,9 @@ void SlobResourceRequest::run()
   try {
     string resource;
     dict.loadResource( resourceName, resource );
-    if ( resource.empty() )
+    if ( resource.empty() ) {
       throw exNoResource();
+    }
 
     if ( Filetype::isNameOfCSS( resourceName ) ) {
       QString css = QString::fromUtf8( resource.data(), resource.size() );
@@ -1336,10 +1216,10 @@ void SlobResourceRequest::run()
     hasAnyData = true;
   }
   catch ( std::exception & ex ) {
-    gdWarning( "SLOB: Failed loading resource \"%s\" from \"%s\", reason: %s\n",
-               resourceName.c_str(),
-               dict.getName().c_str(),
-               ex.what() );
+    qWarning( "SLOB: Failed loading resource \"%s\" from \"%s\", reason: %s",
+              resourceName.c_str(),
+              dict.getName().c_str(),
+              ex.what() );
     // Resource not loaded -- we don't set the hasAnyData flag then
   }
 
@@ -1366,8 +1246,9 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
     // scanning
 
     QString firstName = QDir::fromNativeSeparators( fileName.c_str() );
-    if ( !firstName.endsWith( ".slob" ) )
+    if ( !firstName.endsWith( ".slob" ) ) {
       continue;
+    }
 
     // Got the file -- check if we need to rebuid the index
 
@@ -1381,13 +1262,13 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
       if ( Dictionary::needToRebuildIndex( dictFiles, indexFile ) || indexIsOldOrBad( indexFile ) ) {
         SlobFile sf;
 
-        gdDebug( "Slob: Building the index for dictionary: %s\n", fileName.c_str() );
+        qDebug( "Slob: Building the index for dictionary: %s", fileName.c_str() );
 
         sf.open( firstName );
 
         initializing.indexingDictionary( sf.getDictionaryName().toUtf8().constData() );
 
-        File::Class idx( indexFile, "wb" );
+        File::Index idx( indexFile, QIODevice::WriteOnly );
         IdxHeader idxHeader;
         memset( &idxHeader, 0, sizeof( idxHeader ) );
 
@@ -1416,10 +1297,12 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
           if ( contentType.startsWith( "text/html", Qt::CaseInsensitive )
                || contentType.startsWith( "text/plain", Qt::CaseInsensitive ) ) {
             //Article
-            if ( maxHeadwordsToExpand && entries > maxHeadwordsToExpand )
-              indexedWords.addSingleWord( gd::toWString( refEntry.key ), offsets[ i ].second );
-            else
-              indexedWords.addWord( gd::toWString( refEntry.key ), offsets[ i ].second );
+            if ( maxHeadwordsToExpand && entries > maxHeadwordsToExpand ) {
+              indexedWords.addSingleWord( refEntry.key.toStdU32String(), offsets[ i ].second );
+            }
+            else {
+              indexedWords.addWord( refEntry.key.toStdU32String(), offsets[ i ].second );
+            }
 
             wordCount += 1;
 
@@ -1430,7 +1313,7 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
             }
           }
           else {
-            indexedResources.addSingleWord( gd::toWString( refEntry.key ), offsets[ i ].second );
+            indexedResources.addSingleWord( refEntry.key.toStdU32String(), offsets[ i ].second );
           }
         }
         sf.clearRefOffsets();
@@ -1461,7 +1344,7 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
         idxHeader.articleCount = articleCount;
         idxHeader.wordCount    = wordCount;
 
-        QPair< quint32, quint32 > langs = LangCoder::findIdsForFilename( QString::fromStdString( dictFiles[ 0 ] ) );
+        auto langs = LangCoder::findLangIdPairFromPath( dictFiles[ 0 ] );
 
         idxHeader.langFrom = langs.first;
         idxHeader.langTo   = langs.second;
@@ -1473,11 +1356,11 @@ vector< sptr< Dictionary::Class > > makeDictionaries( vector< string > const & f
       dictionaries.push_back( std::make_shared< SlobDictionary >( dictId, indexFile, dictFiles ) );
     }
     catch ( std::exception & e ) {
-      gdWarning( "Slob dictionary initializing failed: %s, error: %s\n", fileName.c_str(), e.what() );
+      qWarning( "Slob dictionary initializing failed: %s, error: %s", fileName.c_str(), e.what() );
       continue;
     }
     catch ( ... ) {
-      qWarning( "Slob dictionary initializing failed\n" );
+      qWarning( "Slob dictionary initializing failed" );
       continue;
     }
   }

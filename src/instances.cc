@@ -4,6 +4,7 @@
 #include "instances.hh"
 #include <set>
 #include <QBuffer>
+#include <utility>
 
 namespace Instances {
 
@@ -19,17 +20,19 @@ Group::Group( Config::Group const & cfgGroup,
   favoritesFolder( cfgGroup.favoritesFolder ),
   shortcut( cfgGroup.shortcut )
 {
-  if ( !cfgGroup.iconData.isEmpty() )
+  if ( !cfgGroup.iconData.isEmpty() ) {
     iconData = iconFromData( cfgGroup.iconData );
+  }
 
   QMap< string, sptr< Dictionary::Class > > groupDicts;
-  QVector< string > dictOrderList;
+  QList< string > dictOrderList;
   auto dictMap = Dictionary::dictToMap( allDictionaries );
 
   for ( auto const & dict : cfgGroup.dictionaries ) {
-    std::string dictId = dict.id.toStdString();
+    std::string const dictId = dict.id.toStdString();
 
-    if ( dictMap.contains( dictId ) ) {
+    //avoid duplicate dictionary in groups in config file.
+    if ( dictMap.contains( dictId ) && !dictOrderList.contains( dictId ) ) {
       groupDicts.insert( dictId, dictMap[ dictId ] );
       dictOrderList.push_back( dictId );
     }
@@ -37,27 +40,27 @@ Group::Group( Config::Group const & cfgGroup,
 
   // Remove inactive dictionaries
   if ( !inactiveGroup.dictionaries.isEmpty() ) {
-    set< string, std::less<> > inactiveSet;
     for ( auto const & dict : inactiveGroup.dictionaries ) {
-      string dictId = dict.id.toStdString();
+      string const dictId = dict.id.toStdString();
       groupDicts.remove( dictId );
       dictOrderList.removeOne( dictId );
     }
   }
   for ( const auto & dictId : dictOrderList ) {
-    dictionaries.push_back( groupDicts[ dictId ] );
+    if ( groupDicts.contains( dictId ) ) {
+      dictionaries.push_back( groupDicts[ dictId ] );
+    }
   }
 }
 
-Group::Group( QString const & name_ ):
-  id( 0 ),
-  name( name_ )
+Group::Group():
+  id( 0 )
 {
 }
 
-Group::Group( unsigned id_, QString const & name_ ):
+Group::Group( unsigned id_, QString name_ ):
   id( id_ ),
-  name( name_ )
+  name( std::move( name_ ) )
 {
 }
 
@@ -87,8 +90,9 @@ Config::Group Group::makeConfigGroup()
 
 QIcon Group::makeIcon() const
 {
-  if ( !iconData.isNull() )
+  if ( !iconData.isNull() ) {
     return iconData;
+  }
 
   QIcon i = icon.size() ? QIcon( ":/flags/" + icon ) : QIcon();
 
@@ -100,27 +104,32 @@ void Group::checkMutedDictionaries( Config::MutedDictionaries * mutedDictionarie
   Config::MutedDictionaries temp;
 
   for ( auto const & dict : dictionaries ) {
-    QString id = QString::fromStdString( dict->getId() );
-    if ( mutedDictionaries->contains( id ) )
-      temp.insert( id );
+    auto dictId = QString::fromStdString( dict->getId() );
+    if ( mutedDictionaries->contains( dictId ) ) {
+      temp.insert( dictId );
+    }
   }
   *mutedDictionaries = temp;
 }
 
 Group * Groups::findGroup( unsigned id )
 {
-  for ( unsigned x = 0; x < size(); ++x )
-    if ( operator[]( x ).id == id )
+  for ( unsigned x = 0; x < size(); ++x ) {
+    if ( operator[]( x ).id == id ) {
       return &( operator[]( x ) );
+    }
+  }
 
   return nullptr;
 }
 
 Group const * Groups::findGroup( unsigned id ) const
 {
-  for ( unsigned x = 0; x < size(); ++x )
-    if ( operator[]( x ).id == id )
+  for ( unsigned x = 0; x < size(); ++x ) {
+    if ( operator[]( x ).id == id ) {
       return &( operator[]( x ) );
+    }
+  }
 
   return nullptr;
 }
@@ -131,15 +140,18 @@ void complementDictionaryOrder( Group & group,
 {
   set< string, std::less<> > presentIds;
 
-  for ( unsigned x = group.dictionaries.size(); x--; )
+  for ( unsigned x = group.dictionaries.size(); x--; ) {
     presentIds.insert( group.dictionaries[ x ]->getId() );
+  }
 
-  for ( unsigned x = inactiveDictionaries.dictionaries.size(); x--; )
+  for ( unsigned x = inactiveDictionaries.dictionaries.size(); x--; ) {
     presentIds.insert( inactiveDictionaries.dictionaries[ x ]->getId() );
+  }
 
-  for ( unsigned x = 0; x < dicts.size(); ++x ) {
-    if ( presentIds.find( dicts[ x ]->getId() ) == presentIds.end() )
-      group.dictionaries.push_back( dicts[ x ] );
+  for ( const auto & dict : dicts ) {
+    if ( presentIds.find( dict->getId() ) == presentIds.end() ) {
+      group.dictionaries.push_back( dict );
+    }
   }
 }
 
@@ -147,20 +159,22 @@ void updateNames( Config::Group & group, vector< sptr< Dictionary::Class > > con
 {
 
   for ( unsigned x = group.dictionaries.size(); x--; ) {
-    std::string id = group.dictionaries[ x ].id.toStdString();
+    std::string const id = group.dictionaries[ x ].id.toStdString();
 
-    for ( unsigned y = allDictionaries.size(); y--; )
+    for ( unsigned y = allDictionaries.size(); y--; ) {
       if ( allDictionaries[ y ]->getId() == id ) {
         group.dictionaries[ x ].name = QString::fromUtf8( allDictionaries[ y ]->getName().c_str() );
         break;
       }
+    }
   }
 }
 
 void updateNames( Config::Groups & groups, vector< sptr< Dictionary::Class > > const & allDictionaries )
 {
-  for ( int x = 0; x < groups.size(); ++x )
-    updateNames( groups[ x ], allDictionaries );
+  for ( auto & group : groups ) {
+    updateNames( group, allDictionaries );
+  }
 }
 
 void updateNames( Config::Class & cfg, vector< sptr< Dictionary::Class > > const & allDictionaries )

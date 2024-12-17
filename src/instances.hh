@@ -1,8 +1,7 @@
 /* This file is (c) 2008-2012 Konstantin Isakov <ikm@goldendict.org>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef __INSTANCES_HH_INCLUDED__
-#define __INSTANCES_HH_INCLUDED__
+#pragma once
 
 #include "config.hh"
 #include "dict/dictionary.hh"
@@ -33,9 +32,9 @@ struct Group
          Config::Group const & inactiveGroup );
 
   /// Creates an empty group.
-  explicit Group( QString const & name_ );
+  explicit Group();
 
-  Group( unsigned id, QString const & name_ );
+  Group( unsigned id, QString name_ );
 
   /// Makes the configuration group from the current contents.
   Config::Group makeConfigGroup();
@@ -45,17 +44,6 @@ struct Group
 
   /// Remove id's if not presented in group dictionaries
   void checkMutedDictionaries( Config::MutedDictionaries * mutedDictionaries ) const;
-
-  // Some constants
-
-  /// The id of the 'All' group
-  static const unsigned AllGroupId = UINT_MAX - 1;
-
-  /// The id of the fictious 'Help' group
-  static const unsigned HelpGroupId = UINT_MAX;
-
-  /// Invalid value, used to specify that no group id is specified at all.
-  static const unsigned NoGroupId = 0;
 };
 
 struct Groups: public vector< Group >
@@ -90,5 +78,3 @@ void updateNames( Config::Class &, vector< sptr< Dictionary::Class > > const & a
 QIcon iconFromData( QByteArray const & );
 
 } // namespace Instances
-
-#endif

@@ -75,6 +75,7 @@ private:
                                               { "tk_TM", QT_TR_NOOP( "Turkmen" ) },
                                               { "ie_001", QT_TR_NOOP( "Interlingue" ) },
                                               { "jbo_EN", QT_TR_NOOP( "Lojban" ) },
+                                              { "hu_HU", QT_TR_NOOP( "Hungarian" ) },
                                               { "en_US", QT_TR_NOOP( "English" ) } };
 
   Db();
@@ -464,12 +465,13 @@ BabylonLang getBabylonLangByIndex( int index )
   return BabylonDb[ index ];
 }
 
-quint32 findBlgLangIDByEnglishName( gd::wstring const & lang )
+quint32 findBlgLangIDByEnglishName( std::u32string const & lang )
 {
   QString enName = QString::fromStdU32String( lang );
   for ( const auto & idx : BabylonDb ) {
-    if ( QString::compare( idx.englishName, enName, Qt::CaseInsensitive ) == 0 )
+    if ( QString::compare( idx.englishName, enName, Qt::CaseInsensitive ) == 0 ) {
       return idx.id;
+    }
   }
   return 0;
 }
@@ -482,8 +484,9 @@ QString englishNameForId( Id id )
   }
   const auto i = Db::instance().getIso2ToLangData().find( LangCoder::intToCode2( id ) );
 
-  if ( i == Db::instance().getIso2ToLangData().end() )
+  if ( i == Db::instance().getIso2ToLangData().end() ) {
     return {};
+  }
 
   return i->english;
 }
@@ -496,8 +499,9 @@ QString localizedNameForId( Id id )
   }
   const auto i = Db::instance().getIso2ToLangData().find( LangCoder::intToCode2( id ) );
 
-  if ( i == Db::instance().getIso2ToLangData().end() )
+  if ( i == Db::instance().getIso2ToLangData().end() ) {
     return {};
+  }
 
   return i->localized;
 }
@@ -510,8 +514,9 @@ QString countryCodeForId( Id id )
   }
   const auto i = Db::instance().getIso2ToLangData().find( LangCoder::intToCode2( id ) );
 
-  if ( i == Db::instance().getIso2ToLangData().end() )
+  if ( i == Db::instance().getIso2ToLangData().end() ) {
     return {};
+  }
 
   return i->country;
 }
@@ -520,13 +525,15 @@ QString localizedStringForId( Id langId )
 {
   QString name = localizedNameForId( langId );
 
-  if ( name.isEmpty() )
+  if ( name.isEmpty() ) {
     return name;
+  }
 
   QString iconId = countryCodeForId( langId );
 
-  if ( iconId.isEmpty() )
+  if ( iconId.isEmpty() ) {
     return name;
+  }
   return QString( "<img src=\":/flags/%1.png\"> %2" ).arg( iconId, name );
 }
 

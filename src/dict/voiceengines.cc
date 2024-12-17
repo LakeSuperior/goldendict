@@ -1,25 +1,26 @@
 /* This file is (c) 2013 Timon Wong <timon86.wang@gmail.com>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
+#ifdef TTS_SUPPORT
 
-#include "voiceengines.hh"
-#include "audiolink.hh"
-#include "htmlescape.hh"
-#include "utf8.hh"
-#include "wstring_qt.hh"
+  #include "voiceengines.hh"
+  #include "audiolink.hh"
+  #include "htmlescape.hh"
+  #include "text.hh"
 
-#include <string>
-#include <map>
+  #include <string>
+  #include <map>
 
-#include <QDir>
-#include <QFileInfo>
-#include <QCryptographicHash>
+  #include <QDir>
+  #include <QFileInfo>
+  #include <QCryptographicHash>
 
-#include "utils.hh"
+  #include "utils.hh"
 
 namespace VoiceEngines {
 
 using namespace Dictionary;
 using std::string;
+using std::u32string;
 using std::map;
 
 inline string toMd5( QByteArray const & b )
@@ -46,10 +47,6 @@ public:
     return voiceEngine.name.toUtf8().data();
   }
 
-  map< Property, string > getProperties() noexcept override
-  {
-    return map< Property, string >();
-  }
 
   unsigned long getArticleCount() noexcept override
   {
@@ -61,16 +58,18 @@ public:
     return 0;
   }
 
-  sptr< WordSearchRequest > prefixMatch( wstring const & word, unsigned long maxResults ) override;
+  sptr< WordSearchRequest > prefixMatch( u32string const & word, unsigned long maxResults ) override;
 
-  sptr< DataRequest > getArticle( wstring const &, vector< wstring > const & alts, wstring const &, bool ) override;
+  sptr< DataRequest >
+  getArticle( u32string const &, vector< u32string > const & alts, u32string const &, bool ) override;
 
 protected:
 
   void loadIcon() noexcept override;
 };
 
-sptr< WordSearchRequest > VoiceEnginesDictionary::prefixMatch( wstring const & /*word*/, unsigned long /*maxResults*/ )
+sptr< WordSearchRequest > VoiceEnginesDictionary::prefixMatch( u32string const & /*word*/,
+                                                               unsigned long /*maxResults*/ )
 
 {
   WordSearchRequestInstant * sr = new WordSearchRequestInstant();
@@ -79,11 +78,11 @@ sptr< WordSearchRequest > VoiceEnginesDictionary::prefixMatch( wstring const & /
 }
 
 sptr< Dictionary::DataRequest >
-VoiceEnginesDictionary::getArticle( wstring const & word, vector< wstring > const &, wstring const &, bool )
+VoiceEnginesDictionary::getArticle( u32string const & word, vector< u32string > const &, u32string const &, bool )
 
 {
   string result;
-  string wordUtf8( Utf8::encode( word ) );
+  string wordUtf8( Text::toUtf8( word ) );
 
   result += "<table class=\"voiceengines_play\"><tr>";
 
@@ -91,13 +90,13 @@ VoiceEnginesDictionary::getArticle( wstring const & word, vector< wstring > cons
   url.setScheme( "gdtts" );
   url.setHost( "localhost" );
   url.setPath( Utils::Url::ensureLeadingSlash( QString::fromUtf8( wordUtf8.c_str() ) ) );
-  QList< QPair< QString, QString > > query;
-  query.push_back( QPair< QString, QString >( "engine", QString::fromStdString( getId() ) ) );
+  QList< std::pair< QString, QString > > query;
+  query.push_back( std::pair< QString, QString >( "engine", QString::fromStdString( getId() ) ) );
   Utils::Url::setQueryItems( url, query );
 
   string encodedUrl = url.toEncoded().data();
   string ref        = string( "\"" ) + encodedUrl + "\"";
-  result += addAudioLink( ref, getId() );
+  result += addAudioLink( encodedUrl, getId() );
 
   result += "<td><a href=" + ref + R"(><img src="qrc:///icons/playsound.png" border="0" alt="Play"/></a></td>)";
   result += "<td><a href=" + ref + ">" + Html::escape( wordUtf8 ) + "</a></td>";
@@ -137,3 +136,5 @@ vector< sptr< Dictionary::Class > > makeDictionaries( Config::VoiceEngines const
 }
 
 } // namespace VoiceEngines
+
+#endif

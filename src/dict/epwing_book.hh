@@ -1,12 +1,11 @@
-#ifndef __EPWING_BOOK_HH_INCLUDED__
-#define __EPWING_BOOK_HH_INCLUDED__
+#pragma once
 
 #include "dict/dictionary.hh"
 #include "ex.hh"
 
 #include <QMap>
 #include <QStack>
-#include <QVector>
+#include <QList>
 #include <QtGlobal>
 
 #include <string>
@@ -17,15 +16,14 @@
 #endif
 
 #include <QString>
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
-  #include <QtCore5Compat/QTextCodec>
-#else
-  #include <QTextCodec>
-#endif
+#include <QtCore5Compat/QTextCodec>
 
-
-#ifdef _MSC_VER
-  #include <stub_msvc.h>
+// POSIX symbol unavailable on Windows needed for eb headers
+#ifdef Q_OS_WIN
+  #ifndef _SSIZE_T
+    #define _SSIZE_T
+    #define ssize_t long
+  #endif
 #endif
 
 #include <eb/eb.h>
@@ -58,7 +56,7 @@ struct EpwingHeadword
 
 class EpwingBook
 {
-  typedef QPair< int, int > EWPos;
+  using EWPos = std::pair< int, int >;
 
   void setErrorString( QString const & func, EB_Error_Code code );
 
@@ -79,10 +77,10 @@ class EpwingBook
   int monoWidth, monoHeight;
   QStringList imageCacheList, soundsCacheList, moviesCacheList, fontsCacheList;
   QMap< QString, QString > baseFontsMap, customFontsMap;
-  QVector< int > refPages, refOffsets;
+  QList< int > refPages, refOffsets;
   QMap< uint64_t, bool > allHeadwordPositions;
   QMap< uint64_t, bool > allRefPositions;
-  QVector< EWPos > LinksQueue;
+  QList< EWPos > LinksQueue;
   int refOpenCount, refCloseCount;
   static QMutex libMutex;
   QList< EpwingHeadword > candidateItems;
@@ -242,9 +240,9 @@ public:
 
   QByteArray handleReference( EB_Hook_Code code, const unsigned int * argv );
 
-  bool getMatches( QString word, QVector< QString > & matches );
+  bool getMatches( QString word, QList< QString > & matches );
 
-  bool getArticlePos( QString word, QVector< int > & pages, QVector< int > & offsets );
+  bool getArticlePos( QString word, QList< int > & pages, QList< int > & offsets );
   QString repairSubBookDirectory( QString subBookDir );
 };
 
@@ -270,6 +268,3 @@ struct EContainer
 } // namespace Book
 
 } // namespace Epwing
-
-
-#endif // __EPWING_BOOK_HH_INCLUDED__

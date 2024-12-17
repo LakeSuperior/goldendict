@@ -10,13 +10,11 @@ Additionally, multiple strategies of automatic grouping are provided:
 
 ## Auto groups by dictionary language
 
-When group by dictionary language, the language is taken from dictionary's built-in metadata which has been embed when creating dictionary.
+For formats like DSL, which has embedded language from / to metadata, GD will use the dictionary's built-in metadata.
 
-If the language is not present in the dictionary, it will try to detect the language from the dictionary file name.
+For other formats, GD will try finding the last `{id}-{id}` pair delimited by non-alphabets in dictionary name or main file name to extract languages. The `{id}` is 2 or 3 letters ISO 639 codes. For example, if a dictionary named `some name en-zh`, it will be automatically grouped into `en-zh`.
 
-Then use the founded language to create dictionary groups.
-
-Groups created in this method also include a context menu when rich click the group name, in which you can do additional dictionaries grouping by source or target language and combine dictionaries in more large groups.
+Groups created in this method also include a context menu when right-click the group name, in which you can do additional dictionaries grouping by source or target language and combine dictionaries in more large groups.
 
 ## Auto groups by folders
 

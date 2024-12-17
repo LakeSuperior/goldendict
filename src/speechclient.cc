@@ -1,8 +1,10 @@
-#include "speechclient.hh"
+#ifdef TTS_SUPPORT
 
-#include <QtCore>
-#include <QLocale>
-#include <QDebug>
+  #include "speechclient.hh"
+
+  #include <QtCore>
+  #include <QLocale>
+  #include <QDebug>
 SpeechClient::SpeechClient( Config::VoiceEngine const & e, QObject * parent ):
   QObject( parent ),
   internalData( new InternalData( e ) )
@@ -18,17 +20,17 @@ SpeechClient::Engines SpeechClient::availableEngines()
   for ( const auto & engine_name : innerEngines ) {
     const auto sp = new QTextToSpeech( engine_name );
 
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
+  #if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
     if ( sp->state() == QTextToSpeech::Error )
       continue;
-#else
+  #else
     if ( !sp || sp->state() == QTextToSpeech::BackendError )
       continue;
-#endif
+  #endif
 
     qDebug() << engine_name << sp->state();
 
-    //    const QVector< QLocale > locales = sp->availableLocales();
+    //    const QList< QLocale > locales = sp->availableLocales();
     //    for ( const QLocale & locale : locales )
     {
       QLocale locale;
@@ -37,7 +39,7 @@ SpeechClient::Engines SpeechClient::availableEngines()
       for ( const QVoice & voice : sp->availableVoices() ) {
         const QString name( QString( "%4 - %3 %1 (%2)" )
                               .arg( QLocale::languageToString( locale.language() ),
-                                    ( QLocale::countryToString( locale.country() ) ),
+                                    ( QLocale::territoryToString( locale.territory() ) ),
                                     voice.name(),
                                     engine_name ) );
         Engine engine( Config::VoiceEngine( engine_name, name, voice.name(), QLocale( locale ), 50, 0 ) );
@@ -67,3 +69,5 @@ bool SpeechClient::tell( QString const & text ) const
 {
   return tell( text, internalData->engine.volume, internalData->engine.rate );
 }
+
+#endif

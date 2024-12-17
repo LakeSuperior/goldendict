@@ -1,8 +1,7 @@
 /* This file is (c) 2008-2012 Konstantin Isakov <ikm@goldendict.org>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef __HTMLESCAPE_HH_INCLUDED__
-#define __HTMLESCAPE_HH_INCLUDED__
+#pragma once
 
 #include <QString>
 #include <string>
@@ -25,13 +24,11 @@ string preformat( string const &, bool baseRightToLeft = false );
 
 // Escapes the given string to be included in JavaScript.
 string escapeForJavaScript( string const & );
-QString stripHtml( QString & tmp );
+QString stripHtml( QString tmp );
 // Replace html entities
-QString unescape( QString const & str, HtmlOption option = HtmlOption::Strip );
+QString unescape( QString str, HtmlOption option = HtmlOption::Strip );
 
 QString fromHtmlEscaped( QString const & str );
 string unescapeUtf8( string const & str, HtmlOption option = HtmlOption::Strip );
 
 } // namespace Html
-
-#endif

@@ -14,7 +14,7 @@ string escape( string const & str )
 {
   string result( str );
 
-  for ( size_t x = result.size(); x--; )
+  for ( size_t x = result.size(); x--; ) {
     switch ( result[ x ] ) {
       case '&':
         result.erase( x, 1 );
@@ -39,6 +39,7 @@ string escape( string const & str )
       default:
         break;
     }
+  }
 
   return result;
 }
@@ -82,16 +83,18 @@ string preformat( string const & str, bool baseRightToLeft )
       continue;
     }
 
-    if ( *nextChar == '\r' )
+    if ( *nextChar == '\r' ) {
       continue; // Just skip all \r
+    }
 
     line.push_back( *nextChar );
 
     leading = false;
   }
 
-  if ( !line.empty() )
+  if ( !line.empty() ) {
     storeLineInDiv( result, line, baseRightToLeft );
+  }
 
   return result;
 }
@@ -100,7 +103,7 @@ string escapeForJavaScript( string const & str )
 {
   string result( str );
 
-  for ( size_t x = result.size(); x--; )
+  for ( size_t x = result.size(); x--; ) {
     switch ( result[ x ] ) {
       case '\\':
       case '"':
@@ -126,30 +129,30 @@ string escapeForJavaScript( string const & str )
       default:
         break;
     }
+  }
 
   return result;
 }
 
-QString stripHtml( QString & tmp )
+QString stripHtml( QString tmp )
 {
-  tmp.replace(
-    QRegularExpression(
-      "<(?:\\s*/?(?:div|h[1-6r]|q|p(?![alr])|br|li(?![ns])|td|blockquote|[uo]l|pre|d[dl]|nav|address))[^>]{0,}>",
-      QRegularExpression::CaseInsensitiveOption ),
-    " " );
-  tmp.replace( QRegularExpression( "<[^>]*>" ), " " );
+  static QRegularExpression htmlRegex(
+    "<(?:\\s*/?(?:div|h[1-6r]|q|p(?![alr])|br|li(?![ns])|td|blockquote|[uo]l|pre|d[dl]|nav|address))[^>]{0,}>",
+    QRegularExpression::CaseInsensitiveOption );
+  tmp.replace( htmlRegex, " " );
+  static QRegularExpression htmlElementRegex( "<[^>]*>" );
+  tmp.replace( htmlElementRegex, " " );
   return tmp;
 }
 
-QString unescape( QString const & str, HtmlOption option )
+QString unescape( QString str, HtmlOption option )
 {
   // Does it contain HTML? If it does, we need to strip it
   if ( str.contains( '<' ) || str.contains( '&' ) ) {
-    QString tmp = str;
     if ( option == HtmlOption::Strip ) {
-      stripHtml( tmp );
+      str = stripHtml( str );
     }
-    return QTextDocumentFragment::fromHtml( tmp.trimmed() ).toPlainText();
+    return QTextDocumentFragment::fromHtml( str.trimmed() ).toPlainText();
   }
   return str;
 }

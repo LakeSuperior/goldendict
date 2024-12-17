@@ -1,12 +1,12 @@
-#ifndef __SPEECHCLIENT_HH_INCLUDED__
-#define __SPEECHCLIENT_HH_INCLUDED__
-
-#include <QObject>
-#include "config.hh"
-#include <QTextToSpeech>
-#include <memory>
-#include <QDebug>
-#include <QSharedPointer>
+#pragma once
+#ifdef TTS_SUPPORT
+  #include "fixx11h.h"
+  #include <QObject>
+  #include "config.hh"
+  #include <QTextToSpeech>
+  #include <memory>
+  #include <QDebug>
+  #include <QSharedPointer>
 
 class SpeechClient: public QObject
 {
@@ -43,13 +43,13 @@ public:
       engine( e )
     {
       qDebug() << QStringLiteral( "initialize tts" ) << e.engine_name;
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
+  #if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
       if ( !sp || sp->state() == QTextToSpeech::Error )
         return;
-#else
+  #else
       if ( !sp || sp->state() == QTextToSpeech::BackendError )
         return;
-#endif
+  #endif
       sp->setLocale( e.locale );
       auto voices = sp->availableVoices();
       for ( const auto & voice : voices ) {
@@ -81,4 +81,4 @@ private:
   QSharedPointer< InternalData > internalData;
 };
 
-#endif // __SPEECHCLIENT_HH_INCLUDED__
+#endif

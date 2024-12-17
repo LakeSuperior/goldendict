@@ -1,8 +1,7 @@
 /* This file is (c) 2012 Tvangeste <i.4m.l33t@yandex.ru>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef MAINTABWIDGET_HH
-#define MAINTABWIDGET_HH
+#pragma once
 
 #include <QTabWidget>
 #include <QTabBar>
@@ -23,12 +22,6 @@ public:
   }
   void setHideSingleTab( bool hide );
 
-signals:
-  void doubleClicked();
-
-protected:
-  //  virtual void mouseDoubleClickEvent ( QMouseEvent * event );
-
 private:
   virtual void tabInserted( int index );
   virtual void tabRemoved( int index );
@@ -37,5 +30,3 @@ private:
 
   bool hideSingleTab;
 };
-
-#endif // MAINTABWIDGET_HH

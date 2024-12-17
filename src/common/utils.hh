@@ -1,7 +1,6 @@
 /* Thin wrappers for retaining compatibility for both Qt6.x and Qt5.x */
 
-#ifndef UTILS_HH
-#define UTILS_HH
+#pragma once
 
 #include <QAtomicInt>
 #include <QJsonDocument>
@@ -40,8 +39,21 @@ inline QString rstrip( const QString & str )
   return {};
 }
 
+inline uint32_t leadingSpaceCount( const QString & str )
+{
+  for ( int i = 0; i < str.size(); i++ ) {
+    if ( str.at( i ).isSpace() ) {
+      continue;
+    }
+    else {
+      return i;
+    }
+  }
+  return 0;
+}
+
 std::string c_string( const QString & str );
-bool endsWithIgnoreCase( const string & str1, string str2 );
+bool endsWithIgnoreCase( QByteArrayView str, QByteArrayView extension );
 /**
  * remove punctuation , space, symbol
  *
@@ -194,7 +206,7 @@ inline void removeQueryItem( QUrl & url, QString const & key )
   url.setQuery( urlQuery );
 }
 
-inline void setQueryItems( QUrl & url, QList< QPair< QString, QString > > const & query )
+inline void setQueryItems( QUrl & url, QList< std::pair< QString, QString > > const & query )
 {
   QUrlQuery urlQuery( url );
   urlQuery.setQueryItems( query );
@@ -258,9 +270,14 @@ inline bool isAudioUrl( QUrl const & url )
 {
   if ( !url.isValid() )
     return false;
-  // Note: we check for forvo sound links explicitly, as they don't have extensions
 
-  return ( url.scheme() == "http" || url.scheme() == "https" || url.scheme() == "gdau" )
+  // gdau links are known to be audios, (sometimes they may not have file extension).
+  if ( url.scheme() == "gdau" ) {
+    return true;
+  }
+
+  // Note: we check for forvo sound links explicitly, as they don't have extensions
+  return ( url.scheme() == "http" || url.scheme() == "https" )
     && ( Filetype::isNameOfSound( url.path().toUtf8().data() ) || url.host() == "apifree.forvo.com" );
 }
 
@@ -341,10 +358,12 @@ void removeDirectory( QString const & directory );
 void removeDirectory( string const & directory );
 } // namespace Fs
 
+namespace WebSite {
+QString urlReplaceWord( const QString url, QString word );
+}
+
 QString escapeAmps( QString const & str );
 
 QString unescapeAmps( QString const & str );
 
 } // namespace Utils
-
-#endif // UTILS_HH

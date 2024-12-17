@@ -4,10 +4,8 @@
 #include <QStyle>
 #include <QMessageBox>
 #include <string>
-#ifdef _MSC_VER
-  #include <stub_msvc.h>
-#endif
 #include <QBuffer>
+#include <QTextCodec>
 
 using std::string;
 namespace Utils {
@@ -30,10 +28,10 @@ std::string c_string( const QString & str )
   return std::string( str.toUtf8().constData() );
 }
 
-bool endsWithIgnoreCase( const string & str1, string str2 )
+bool endsWithIgnoreCase( QByteArrayView str, QByteArrayView extension )
 {
-  return ( str1.size() >= (unsigned)str2.size() )
-    && ( strcasecmp( str1.c_str() + ( str1.size() - str2.size() ), str2.data() ) == 0 );
+  return ( str.size() >= extension.size() )
+    && ( str.last( extension.size() ).compare( extension, Qt::CaseInsensitive ) == 0 );
 }
 
 QString escapeAmps( QString const & str )
@@ -100,8 +98,9 @@ std::string basename( std::string const & str )
 {
   size_t x = str.rfind( separator() );
 
-  if ( x == std::string::npos )
+  if ( x == std::string::npos ) {
     return str;
+  }
 
   return std::string( str, x + 1 );
 }
@@ -118,3 +117,55 @@ void removeDirectory( string const & directory )
 }
 
 } // namespace Utils::Fs
+
+namespace Utils::WebSite {
+QString urlReplaceWord( const QString url, QString inputWord )
+{
+  //copy temp url
+  auto urlString = url;
+
+  urlString.replace( "%25GDWORD%25", inputWord.toUtf8().toPercentEncoding() );
+
+  QTextCodec * codec = QTextCodec::codecForName( "Windows-1251" );
+  if ( codec ) {
+    urlString.replace( "%25GD1251%25", codec->fromUnicode( inputWord ).toPercentEncoding() );
+  }
+
+  codec = QTextCodec::codecForName( "Big-5" );
+  if ( codec ) {
+    urlString.replace( "%25GDBIG5%25", codec->fromUnicode( inputWord ).toPercentEncoding() );
+  }
+
+  codec = QTextCodec::codecForName( "Big5-HKSCS" );
+  if ( codec ) {
+    urlString.replace( "%25GDBIG5HKSCS%25", codec->fromUnicode( inputWord ).toPercentEncoding() );
+  }
+
+  codec = QTextCodec::codecForName( "Shift-JIS" );
+  if ( codec ) {
+    urlString.replace( "%25GDSHIFTJIS%25", codec->fromUnicode( inputWord ).toPercentEncoding() );
+  }
+
+  codec = QTextCodec::codecForName( "GB18030" );
+  if ( codec ) {
+    urlString.replace( "%25GDGBK%25", codec->fromUnicode( inputWord ).toPercentEncoding() );
+  }
+
+
+  // Handle all ISO-8859 encodings
+  for ( int x = 1; x <= 16; ++x ) {
+    codec = QTextCodec::codecForName( QString( "ISO 8859-%1" ).arg( x ).toLatin1() );
+    if ( codec ) {
+      urlString.replace( QString( "%25GDISO%1%25" ).arg( x ).toUtf8(),
+                         codec->fromUnicode( inputWord ).toPercentEncoding() );
+    }
+
+    // Skip encodings 11..12, they don't exist
+    if ( x == 10 ) {
+      x = 12;
+    }
+  }
+
+  return urlString;
+}
+} // namespace Utils::WebSite

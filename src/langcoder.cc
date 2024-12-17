@@ -3,17 +3,11 @@
 
 #include "langcoder.hh"
 #include "language.hh"
-#include "utf8.hh"
+#include "text.hh"
 
 #include <QFileInfo>
 #include <QLocale>
-
-#ifdef _MSC_VER
-  #include <stub_msvc.h>
-#endif
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
-  #include <QtCore5Compat/QRegExp>
-#endif
+#include <QRegularExpression>
 
 // Language codes
 
@@ -208,30 +202,22 @@ QMap< QString, GDLangCode > LangCoder::LANG_CODE_MAP = {
 
 QString LangCoder::decode( quint32 _code )
 {
-  if ( auto code = intToCode2( _code ); exists( code ) )
+  if ( auto code = intToCode2( _code ); code2Exists( code ) ) {
     return QString::fromStdString( LANG_CODE_MAP[ code ].lang );
-
-  return {};
-}
-bool LangCoder::exists( const QString & _code )
-{
-  return LANG_CODE_MAP.contains( _code );
-}
-
-QIcon LangCoder::icon( quint32 _code )
-{
-  if ( auto code = intToCode2( _code ); exists( code ) ) {
-    const GDLangCode & lc = LANG_CODE_MAP[ code ];
-    return QIcon( ":/flags/" + QString( lc.code ) + ".png" );
   }
 
   return {};
 }
+bool LangCoder::code2Exists( const QString & _code )
+{
+  return LANG_CODE_MAP.contains( _code );
+}
 
 QString LangCoder::intToCode2( quint32 val )
 {
-  if ( !val || val == 0xFFffFFff )
+  if ( !val || val == 0xFFffFFff ) {
     return {};
+  }
 
   QByteArray ba;
   ba.append( val & 0xFF );
@@ -240,13 +226,13 @@ QString LangCoder::intToCode2( quint32 val )
   return QString::fromLatin1( ba );
 }
 
-quint32 LangCoder::findIdForLanguage( gd::wstring const & lang )
+quint32 LangCoder::findIdForLanguage( std::u32string const & lang )
 {
-  const auto langFolded = Utf8::encode( lang );
+  const auto langFolded = QByteArrayView( Text::toUtf8( lang ) );
 
   for ( auto const & lc : LANG_CODE_MAP ) {
-    if ( strcasecmp( langFolded.c_str(), lc.lang.c_str() ) == 0 ) {
-      return code2toInt( lc.code.toStdString().c_str() );
+    if ( langFolded.compare( lc.lang, Qt::CaseInsensitive ) == 0 ) {
+      return code2toInt( lc.code2.toStdString().c_str() );
     }
   }
 
@@ -257,7 +243,7 @@ quint32 LangCoder::findIdForLanguageCode3( std::string const & code )
 {
   for ( auto const & lc : LANG_CODE_MAP ) {
     if ( code == lc.code3 ) {
-      return code2toInt( lc.code );
+      return code2toInt( lc.code2 );
     }
   }
 
@@ -269,14 +255,15 @@ quint32 LangCoder::guessId( const QString & lang )
   QString lstr = lang.simplified().toLower();
 
   // too small to guess
-  if ( lstr.size() < 2 )
+  if ( lstr.size() < 2 ) {
     return 0;
+  }
 
   // check if it could be the whole language name
   if ( lstr.size() >= 3 ) {
     for ( auto const & lc : LANG_CODE_MAP ) {
       if ( lstr == ( lstr.size() == 3 ? QString::fromStdString( lc.code3 ) : QString::fromStdString( lc.lang ) ) ) {
-        return code2toInt( lc.code );
+        return code2toInt( lc.code2 );
       }
     }
   }
@@ -285,36 +272,40 @@ quint32 LangCoder::guessId( const QString & lang )
   return code2toInt( lstr.left( 2 ).toLatin1().data() );
 }
 
-QPair< quint32, quint32 > LangCoder::findIdsForName( QString const & name )
+
+std::pair< quint32, quint32 > LangCoder::findLangIdPairFromName( QString const & name )
 {
-  QString nameFolded = "|" + name.toCaseFolded() + "|";
-  QRegExp reg( "[^a-z]([a-z]{2,3})-([a-z]{2,3})[^a-z]" );
-  reg.setMinimal( true );
-  int off = 0;
+  static QRegularExpression reg( "(^|[^a-z])((?<lang1>[a-z]{2,3})-(?<lang2>[a-z]{2,3}))($|[^a-z])",
+                                 QRegularExpression::CaseInsensitiveOption );
 
-  while ( reg.indexIn( nameFolded, off ) >= 0 ) {
-    quint32 from = guessId( reg.cap( 1 ) );
-    quint32 to   = guessId( reg.cap( 2 ) );
-    if ( from && to )
-      return QPair< quint32, quint32 >( from, to );
+  auto matches = reg.globalMatch( name );
+  while ( matches.hasNext() ) {
+    auto m = matches.next();
+    if ( matches.hasNext() ) {
+      continue; // We use only the last match, skip previous ones
+    }
 
-    off += reg.matchedLength();
+    auto fromId = guessId( m.captured( "lang1" ).toLower() );
+    auto toId   = guessId( m.captured( "lang2" ).toLower() );
+
+    if ( code2Exists( intToCode2( fromId ) ) && code2Exists( intToCode2( toId ) ) ) {
+      return { fromId, toId };
+    }
   }
-
-  return QPair< quint32, quint32 >( 0, 0 );
+  return { 0, 0 };
 }
 
-QPair< quint32, quint32 > LangCoder::findIdsForFilename( QString const & name )
+std::pair< quint32, quint32 > LangCoder::findLangIdPairFromPath( std::string const & p )
 {
-  return findIdsForName( QFileInfo( name ).fileName() );
+  return findLangIdPairFromName( QFileInfo( QString::fromStdString( p ) ).fileName() );
 }
 
 bool LangCoder::isLanguageRTL( quint32 _code )
 {
-  if ( auto code = intToCode2( _code ); exists( code ) ) {
+  if ( auto code = intToCode2( _code ); code2Exists( code ) ) {
     GDLangCode lc = LANG_CODE_MAP[ code ];
     if ( lc.isRTL < 0 ) {
-      lc.isRTL = static_cast< int >( QLocale( lc.code ).textDirection() == Qt::RightToLeft );
+      lc.isRTL = static_cast< int >( QLocale( lc.code2 ).textDirection() == Qt::RightToLeft );
     }
     return lc.isRTL != 0;
   }

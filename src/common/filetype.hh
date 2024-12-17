@@ -1,8 +1,7 @@
 /* This file is (c) 2008-2012 Konstantin Isakov <ikm@goldendict.org>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef __FILETYPE_HH_INCLUDED__
-#define __FILETYPE_HH_INCLUDED__
+#pragma once
 
 #include <string>
 
@@ -24,7 +23,6 @@ bool isNameOfVideo( string const & );
 bool isNameOfPicture( string const & );
 /// Returns true if the name resembles the one of a .tiff file (i.e. ends
 /// with .tif or tiff). We have this one separately since we need to reconvert
-/// TIFF files as WebKit doesn't seem to support them.
 bool isNameOfTiff( string const & );
 /// Returns true if the name resembles the one of a .css file
 bool isNameOfCSS( string const & );
@@ -32,5 +30,3 @@ bool isNameOfCSS( string const & );
 bool isNameOfSvg( string const & name );
 
 } // namespace Filetype
-
-#endif

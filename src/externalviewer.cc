@@ -4,8 +4,6 @@
 #include <QDir>
 #include <QTimer>
 #include "externalviewer.hh"
-#include "parsecmdline.hh"
-#include "gddebug.hh"
 
 ExternalViewer::ExternalViewer(
   const char * data, int size, QString const & extension, QString const & viewerCmdLine_, QObject * parent ):
@@ -14,8 +12,9 @@ ExternalViewer::ExternalViewer(
   viewer( this ),
   viewerCmdLine( viewerCmdLine_ )
 {
-  if ( !tempFile.open() || tempFile.write( data, size ) != size )
+  if ( !tempFile.open() || tempFile.write( data, size ) != size ) {
     throw exCantCreateTempFile();
+  }
 
   tempFileName = tempFile.fileName(); // For some reason it loses it after it was closed()
 
@@ -26,7 +25,7 @@ ExternalViewer::ExternalViewer(
 
   tempFile.close();
 
-  GD_DPRINTF( "%s\n", tempFile.fileName().toLocal8Bit().data() );
+  qDebug( "%s", tempFile.fileName().toLocal8Bit().data() );
 }
 
 void ExternalViewer::start()
@@ -34,24 +33,25 @@ void ExternalViewer::start()
   connect( &viewer, &QProcess::finished, this, &QObject::deleteLater );
   connect( &viewer, &QProcess::errorOccurred, this, &QObject::deleteLater );
 
-  QStringList args = parseCommandLine( viewerCmdLine );
-
+  QStringList args = QProcess::splitCommand( viewerCmdLine );
   if ( !args.isEmpty() ) {
-    QString program = args.first();
-    args.pop_front();
+    const QString program = args.takeFirst();
     args.push_back( tempFileName );
     viewer.start( program, args, QIODevice::NotOpen );
-    if ( !viewer.waitForStarted() )
+    if ( !viewer.waitForStarted() ) {
       throw exCantRunViewer( viewerCmdLine.toUtf8().data() );
+    }
   }
-  else
+  else {
     throw exCantRunViewer( tr( "the viewer program name is empty" ).toUtf8().data() );
+  }
 }
 
 bool ExternalViewer::stop()
 {
-  if ( viewer.state() == QProcess::NotRunning )
+  if ( viewer.state() == QProcess::NotRunning ) {
     return true;
+  }
   viewer.terminate();
   QTimer::singleShot( 1000, &viewer, &QProcess::kill ); // In case terminate() fails.
   return false;
@@ -60,16 +60,18 @@ bool ExternalViewer::stop()
 void ExternalViewer::stopSynchronously()
 {
   // This implementation comes straight from QProcess::~QProcess().
-  if ( viewer.state() == QProcess::NotRunning )
+  if ( viewer.state() == QProcess::NotRunning ) {
     return;
+  }
   viewer.kill();
   viewer.waitForFinished();
 }
 
 void stopAndDestroySynchronously( ExternalViewer * viewer )
 {
-  if ( !viewer )
+  if ( !viewer ) {
     return;
+  }
   viewer->stopSynchronously();
   delete viewer;
 }

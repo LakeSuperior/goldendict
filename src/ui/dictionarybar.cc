@@ -4,20 +4,21 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QProcess>
+#include <QStyle>
 
 
 using std::vector;
 
 DictionaryBar::DictionaryBar( QWidget * parent,
                               Config::Events & events,
-                              QString const & _editDictionaryCommand,
                               unsigned short const & maxDictionaryRefsInContextMenu_ ):
   QToolBar( tr( "&Dictionary Bar" ), parent ),
   mutedDictionaries( nullptr ),
   configEvents( events ),
-  editDictionaryCommand( _editDictionaryCommand ),
   maxDictionaryRefsInContextMenu( maxDictionaryRefsInContextMenu_ )
 {
+  normalIconSize = { this->iconSize().height(), this->iconSize().height() };
+
   setObjectName( "dictionaryBar" );
 
   maxDictionaryRefsAction =
@@ -34,8 +35,9 @@ static QString elideDictName( QString const & name )
 
   int const maxSize = 33;
 
-  if ( name.size() <= maxSize )
+  if ( name.size() <= maxSize ) {
     return name;
+  }
 
   int const pieceSize = maxSize / 2 - 1;
 
@@ -72,20 +74,37 @@ void DictionaryBar::setDictionaries( vector< sptr< Dictionary::Class > > const &
     dictActions.append( action );
   }
 
-  setDictionaryIconSize( 21 );
 
   setUpdatesEnabled( true );
 }
 
-void DictionaryBar::setDictionaryIconSize( int extent )
+void DictionaryBar::setDictionaryIconSize( IconSize size )
 {
-  setIconSize( QSize( extent, extent ) );
+  switch ( size ) {
+    case IconSize::Small: {
+      auto smallSize = QApplication::style()->pixelMetric( QStyle::PM_SmallIconSize );
+      setIconSize( { smallSize, smallSize } );
+      break;
+    }
+
+    case IconSize::Normal: {
+      setIconSize( normalIconSize );
+      break;
+    }
+
+    case IconSize::Large: {
+      auto largeSize = QApplication::style()->pixelMetric( QStyle::PM_LargeIconSize );
+      setIconSize( { largeSize + 10, largeSize + 10 } ); // the value isn't large enough, so we add 10
+      break;
+    }
+  }
 }
 
 void DictionaryBar::contextMenuEvent( QContextMenuEvent * event )
 {
   showContextMenu( event );
 }
+
 
 void DictionaryBar::showContextMenu( QContextMenuEvent * event, bool extended )
 {
@@ -95,7 +114,6 @@ void DictionaryBar::showContextMenu( QContextMenuEvent * event, bool extended )
 
   const QAction * infoAction           = nullptr;
   const QAction * headwordsAction      = nullptr;
-  const QAction * editDictAction       = nullptr;
   const QAction * openDictFolderAction = nullptr;
   QString dictFilename;
 
@@ -114,23 +132,18 @@ void DictionaryBar::showContextMenu( QContextMenuEvent * event, bool extended )
       infoAction = menu.addAction( tr( "Dictionary info" ) );
 
       if ( pDict->isLocalDictionary() ) {
-        if ( pDict->getWordCount() > 0 )
+        if ( pDict->getWordCount() > 0 ) {
           headwordsAction = menu.addAction( tr( "Dictionary headwords" ) );
+        }
 
         openDictFolderAction = menu.addAction( tr( "Open dictionary folder" ) );
-
-        if ( !editDictionaryCommand.isEmpty() ) {
-          if ( !pDict->getMainFilename().isEmpty() ) {
-            dictFilename   = pDict->getMainFilename();
-            editDictAction = menu.addAction( tr( "Edit dictionary" ) );
-          }
-        }
       }
     }
   }
 
-  if ( !dictActions.empty() )
+  if ( !dictActions.empty() ) {
     menu.addSeparator();
+  }
 
   unsigned refsAdded = 0;
 
@@ -181,31 +194,27 @@ void DictionaryBar::showContextMenu( QContextMenuEvent * event, bool extended )
     return;
   }
 
-  if ( result && result == editDictAction ) {
-    QString command( editDictionaryCommand );
-    command.replace( "%GDDICT%", QString( R"("%1")" ).arg( dictFilename ) );
-    if ( !QProcess::startDetached( command, QStringList() ) )
-      QApplication::beep();
-  }
-
   if ( result && result == maxDictionaryRefsAction ) {
     showContextMenu( event, true );
   }
 
-  if ( result == editAction )
+  if ( result == editAction ) {
     emit editGroupRequested();
-  else if ( result && result->data().value< void * >() )
+  }
+  else if ( result && result->data().value< void * >() ) {
     ( (QAction *)( result->data().value< void * >() ) )->trigger();
+  }
 
   event->accept();
 }
 
 void DictionaryBar::mutedDictionariesChanged()
 {
-  //GD_DPRINTF( "Muted dictionaries changed\n" );
+  //qDebug( "Muted dictionaries changed" );
 
-  if ( !mutedDictionaries )
+  if ( !mutedDictionaries ) {
     return;
+  }
 
   // Update actions
 
@@ -214,8 +223,9 @@ void DictionaryBar::mutedDictionariesChanged()
   for ( const auto & dictAction : dictActions ) {
     bool const isUnmuted = !mutedDictionaries->contains( dictAction->data().toString() );
 
-    if ( isUnmuted != dictAction->isChecked() )
+    if ( isUnmuted != dictAction->isChecked() ) {
       dictAction->setChecked( isUnmuted );
+    }
   }
 
   setUpdatesEnabled( true );
@@ -223,13 +233,15 @@ void DictionaryBar::mutedDictionariesChanged()
 
 void DictionaryBar::actionWasTriggered( QAction * action )
 {
-  if ( !mutedDictionaries )
+  if ( !mutedDictionaries ) {
     return;
+  }
 
   QString const id = action->data().toString();
 
-  if ( id.isEmpty() )
+  if ( id.isEmpty() ) {
     return; // Some weird action, not our button
+  }
 
   if ( QApplication::keyboardModifiers() & ( Qt::ControlModifier | Qt::ShiftModifier ) ) {
     // Ctrl ,solo mode with single dictionary
@@ -263,18 +275,21 @@ void DictionaryBar::actionWasTriggered( QAction * action )
       }
 
       if ( isSolo ) {
-        for ( const auto & dictAction : dictActions )
+        for ( const auto & dictAction : dictActions ) {
           mutedDictionaries->remove( dictAction->data().toString() );
+        }
       }
       else {
         // Make dictionary solo
         for ( const auto & dictAction : dictActions ) {
           QString const dictId = dictAction->data().toString();
 
-          if ( dictId == id )
+          if ( dictId == id ) {
             mutedDictionaries->remove( dictId );
-          else
+          }
+          else {
             mutedDictionaries->insert( dictId );
+          }
         }
       }
     }
@@ -306,8 +321,9 @@ void DictionaryBar::actionWasTriggered( QAction * action )
 
 void DictionaryBar::dictsPaneClicked( const QString & id )
 {
-  if ( !isVisible() )
+  if ( !isVisible() ) {
     return;
+  }
 
   for ( const auto & dictAction : dictActions ) {
     QString const dictId = dictAction->data().toString();

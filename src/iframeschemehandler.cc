@@ -37,10 +37,12 @@ void IframeSchemeHandler::requestStarted( QWebEngineUrlRequestJob * requestJob )
     QString articleString;
 
     QTextCodec * codec = QTextCodec::codecForUtfText( replyData, QTextCodec::codecForName( codecName.toUtf8() ) );
-    if ( codec )
+    if ( codec ) {
       articleString = codec->toUnicode( replyData );
-    else
+    }
+    else {
       articleString = QString::fromUtf8( replyData );
+    }
     // Handle reply data
     // 404 response may have response body.
     if ( reply->error() != QNetworkReply::NoError && articleString.isEmpty() ) {
@@ -103,15 +105,8 @@ void IframeSchemeHandler::requestStarted( QWebEngineUrlRequestJob * requestJob )
 
     buffer->setData( articleString.toUtf8() );
 
-#if QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 )
     requestJob->reply( "text/html; charset=utf-8", buffer );
-#else
-  #if defined( Q_OS_WIN32 ) || defined( Q_OS_MAC )
-    requestJob->reply( contentType, buffer );
-  #else
-    requestJob->reply( "text/html", buffer );
-  #endif
-#endif
+
   };
   connect( reply, &QNetworkReply::finished, requestJob, finishAction );
 

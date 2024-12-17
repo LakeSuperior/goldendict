@@ -1,8 +1,7 @@
 /* This file is (c) 2008-2012 Konstantin Isakov <ikm@goldendict.org>
  * Part of GoldenDict. Licensed under GPLv3 or later, see the LICENSE file */
 
-#ifndef GOLDENDICT_ARTICLEVIEW_H
-#define GOLDENDICT_ARTICLEVIEW_H
+#pragma once
 
 #include <QAction>
 #include <QMap>
@@ -11,21 +10,19 @@
 #include <QWebEngineView>
 #include <list>
 #include "article_netmgr.hh"
-#include "audioplayerinterface.hh"
+#include "audio/audioplayerinterface.hh"
 #include "instances.hh"
 #include "groupcombobox.hh"
 #include "globalbroadcaster.hh"
 #include "article_inspect.hh"
-#if ( QT_VERSION >= QT_VERSION_CHECK( 6, 0, 0 ) )
-  #include <QtCore5Compat/QRegExp>
-
-#endif
+#include <QRegularExpression>
 #include "ankiconnector.hh"
 #include "webmultimediadownload.hh"
 #include "base_type.hh"
 #include "articlewebview.hh"
 #include "ui/searchpanel.hh"
 #include "ui/ftssearchpanel.hh"
+#include "dictionary_group.hh"
 
 class ResourceToSaveHandler;
 class ArticleViewAgent;
@@ -38,8 +35,7 @@ class ArticleView: public QWidget
 
   ArticleNetworkAccessManager & articleNetMgr;
   AudioPlayerPtr const & audioPlayer;
-  std::vector< sptr< Dictionary::Class > > const & allDictionaries;
-  Instances::Groups const & groups;
+  std::unique_ptr< DictionaryGroup > dictionaryGroup;
   bool popupView;
   Config::Class const & cfg;
   QWebChannel * channel;
@@ -49,26 +45,17 @@ class ArticleView: public QWidget
 
   QAction pasteAction, articleUpAction, articleDownAction, goBackAction, goForwardAction, selectCurrentArticleAction,
     copyAsTextAction, inspectAction;
-  QAction & openSearchAction;
-  bool searchIsOpened;
+
   bool expandOptionalParts;
-  QString rangeVarName;
 
   /// An action used to create Anki notes.
   QAction sendToAnkiAction{ tr( "&Create Anki note" ), this };
-
-  /// Any resource we've decided to download off the dictionary gets stored here.
-  /// Full vector capacity is used for search requests, where we have to make
-  /// a multitude of requests.
-  std::list< sptr< Dictionary::DataRequest > > resourceDownloadRequests;
-  /// Url of the resourceDownloadRequests
-  QUrl resourceDownloadUrl;
 
   /// For resources opened via desktop services
   QSet< QString > desktopOpenedTempFiles;
 
   QAction * dictionaryBarToggled;
-  GroupComboBox const * groupComboBox;
+
   unsigned currentGroupId;
   QLineEdit const * translateLine;
 
@@ -83,11 +70,11 @@ class ArticleView: public QWidget
   //current active dictionary id;
   QString activeDictId;
 
+  QString audioLink_;
+
   /// Search in results of full-text search
   QString firstAvailableText;
   QStringList uniqueMatches;
-  bool ftsSearchIsOpened  = false;
-  bool ftsSearchMatchCase = false;
 
   QString delayedHighlightText;
 
@@ -105,16 +92,18 @@ public:
                Instances::Groups const &,
                bool popupView,
                Config::Class const & cfg,
-               QAction & openSearchAction_,
                QLineEdit const * translateLine,
-               QAction * dictionaryBarToggled      = nullptr,
-               GroupComboBox const * groupComboBox = nullptr );
+               QAction * dictionaryBarToggled = nullptr,
+               unsigned currentGroupId        = 0 );
 
 
   void setCurrentGroupId( unsigned currengGrgId );
   unsigned getCurrentGroupId();
 
-  virtual QSize minimumSizeHint() const;
+  void setAudioLink( QString audioLink );
+  QString getAudioLink() const;
+
+  QSize minimumSizeHint() const override;
   void clearContent();
 
   ~ArticleView();
@@ -136,9 +125,10 @@ public:
 
   void showDefinition( QString const & word,
                        QStringList const & dictIDs,
-                       QRegExp const & searchRegExp,
+                       QRegularExpression const & searchRegExp,
                        unsigned group,
                        bool ignoreDiacritics );
+  void showDefinition( QString const & word, QStringList const & dictIDs, unsigned group, bool ignoreDiacritics );
 
   void sendToAnki( QString const & word, QString const & text, QString const & sentence );
   /// Clears the view and sets the application-global waiting cursor,
@@ -159,6 +149,8 @@ public:
                  QUrl const & referrer,
                  QString const & scrollTo  = QString(),
                  Contexts const & contexts = Contexts() );
+  void playAudio( QUrl const & url );
+  void audioDownloadFinished( const sptr< Dictionary::DataRequest > & req );
 
   /// Called when the state of dictionary bar changes and the view is active.
   /// The function reloads content if the change affects it.
@@ -171,6 +163,9 @@ public:
   void setSelectionBySingleClick( bool set );
 
   void setDelayedHighlightText( QString const & text );
+
+  /// \brief Set background as black if darkreader mode is enabled.
+  void syncBackgroundColorWithCfgDarkReader() const;
 
 private:
   // widgets
@@ -252,15 +247,12 @@ public:
   void setActiveArticleId( QString const & );
 
   ResourceToSaveHandler * saveResource( const QUrl & url, const QString & fileName );
-  ResourceToSaveHandler * saveResource( const QUrl & url, const QUrl & ref, const QString & fileName );
 
   void findText( QString & text,
                  const QWebEnginePage::FindFlags & f,
                  const std::function< void( bool match ) > & callback = nullptr );
 
 signals:
-
-  void iconChanged( ArticleView *, QIcon const & icon );
 
   void titleChanged( ArticleView *, QString const & title );
 
@@ -316,6 +308,9 @@ signals:
 
 public slots:
 
+  /// Opens the search (Ctrl+F)
+  void openSearch();
+
   void on_searchPrevious_clicked();
   void on_searchNext_clicked();
 
@@ -334,7 +329,6 @@ private slots:
   void inspectElement();
   void loadFinished( bool ok );
   void handleTitleChanged( QString const & title );
-  void handleUrlChanged( QUrl const & url );
   void attachWebChannelToHtml();
 
   void linkHovered( const QString & link );
@@ -345,7 +339,7 @@ private slots:
     return ( targetUrl.scheme() == "gdau" || Utils::Url::isAudioUrl( targetUrl ) );
   }
 
-  void resourceDownloadFinished();
+  void resourceDownloadFinished( const sptr< Dictionary::DataRequest > & req, const QUrl & resourceDownloadUrl );
 
   /// We handle pasting by attempting to define the word in clipboard.
   void pasteTriggered();
@@ -358,14 +352,10 @@ private slots:
   /// Nagivates to the next article relative to the active one.
   void moveOneArticleDown();
 
-  /// Opens the search area
-  void openSearch();
-
   void on_searchText_textEdited();
   void on_searchText_returnPressed();
   void on_searchCloseButton_clicked();
-  void on_searchCaseSensitive_clicked();
-  void on_highlightAllButton_clicked();
+  void on_searchCaseSensitive_clicked( bool );
 
   void on_ftsSearchPrevious_clicked();
   void on_ftsSearchNext_clicked();
@@ -414,17 +404,13 @@ private:
 
   bool eventFilter( QObject * obj, QEvent * ev ) override;
 
-  void performFindOperation( bool restart, bool backwards, bool checkHighlight = false );
+  void performFindOperation( bool backwards );
 
   /// Returns the comma-separated list of dictionary ids which should be muted
   /// for the given group. If there are none, returns empty string.
   QString getMutedForGroup( unsigned group );
 
   QStringList getMutedDictionaries( unsigned group );
-
-protected:
-  // We need this to hide the search bar when we're showed
-  void showEvent( QShowEvent * ) override;
 };
 
 class ResourceToSaveHandler: public QObject
@@ -466,5 +452,3 @@ public slots:
   Q_INVOKABLE void linkClickedInHtml( QUrl const & );
   Q_INVOKABLE void collapseInHtml( QString const & dictId, bool on = true ) const;
 };
-
-#endif

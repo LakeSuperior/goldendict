@@ -1,5 +1,4 @@
-#ifndef __PREFERENCES_HH_INCLUDED__
-#define __PREFERENCES_HH_INCLUDED__
+#pragma once
 
 #include <QDialog>
 #include <QAction>
@@ -41,14 +40,6 @@ private slots:
   void enableScanPopupModifiersToggled( bool );
   void showScanFlagToggled( bool b );
 
-  void wholeAltClicked( bool );
-  void wholeCtrlClicked( bool );
-  void wholeShiftClicked( bool );
-
-  void sideAltClicked( bool );
-  void sideCtrlClicked( bool );
-  void sideShiftClicked( bool );
-
   void on_enableMainWindowHotkey_toggled( bool checked );
   void on_enableClipboardHotkey_toggled( bool checked );
 
@@ -62,5 +53,3 @@ private slots:
   void on_collapseBigArticles_toggled( bool checked );
   void on_limitInputPhraseLength_toggled( bool checked );
 };
-
-#endif

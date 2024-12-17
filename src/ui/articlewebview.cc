@@ -80,8 +80,14 @@ bool ArticleWebView::eventFilter( QObject * obj, QEvent * ev )
         singleClickAction( pe );
       } );
     }
-    if ( pe->buttons() & Qt::MiddleButton )
+    if ( pe->buttons() & Qt::MiddleButton ) {
       midButtonPressed = true;
+      QTimer::singleShot( 100, this, [ = ]() {
+        sendCustomMouseEvent( QEvent::MouseButtonPress );
+        sendCustomMouseEvent( QEvent::MouseButtonRelease );
+      } );
+      return false;
+    }
   }
   if ( ev->type() == QEvent::MouseButtonRelease ) {
     auto pe = dynamic_cast< QMouseEvent * >( ev );
@@ -105,8 +111,9 @@ bool ArticleWebView::eventFilter( QObject * obj, QEvent * ev )
 
 void ArticleWebView::singleClickAction( QMouseEvent * event )
 {
-  if ( !singleClickToDbClick )
+  if ( !singleClickToDbClick ) {
     return;
+  }
 
   if ( selectionBySingleClick ) {
     findText( "" ); // clear the selection first, if any
