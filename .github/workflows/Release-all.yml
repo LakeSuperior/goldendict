@@ -213,4 +213,4 @@ jobs:
       - name: Upload artifacts
         run: |
           gh release upload '${{ env.newTag }}' --repo ${GITHUB_REPOSITORY} --clobber \
-            *.7z *.exe *.pdb *.dmg 
+            *.7z *.exe *.pdb 
