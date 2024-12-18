@@ -372,12 +372,12 @@ struct Preferences
 
   // Appearances
 
-  Dark darkMode       = Dark::Off;
+  Dark darkMode       = Dark::Auto;
   Dark darkReaderMode =
 #if defined( Q_OS_MACOS )
     Dark::Auto;
 #else
-    Dark::Off;
+    Dark::Auto;
 #endif
 
   QString addonStyle;
