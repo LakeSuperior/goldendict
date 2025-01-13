@@ -46,6 +46,7 @@ CMakeLists.txt.user
 CMakeFiles
 CMakeCache.txt
 _deps
+CMakePresets.json
 
 # kdevelop
 .kdev4/
