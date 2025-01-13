@@ -751,10 +751,10 @@ bool ArticleView::eventFilter( QObject * obj, QEvent * ev )
       QWheelEvent * pe = static_cast< QWheelEvent * >( ev );
       if ( pe->modifiers().testFlag( Qt::ControlModifier ) ) {
         if ( pe->angleDelta().y() > 0 ) {
-          zoomIn();
+          //zoomIn();
         }
         else {
-          zoomOut();
+          //zoomOut();
         }
       }
     }

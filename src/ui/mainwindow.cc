@@ -1450,10 +1450,10 @@ void MainWindow::wheelEvent( QWheelEvent * ev )
 {
   if ( ev->modifiers().testFlag( Qt::ControlModifier ) ) {
     if ( ev->angleDelta().y() > 0 ) {
-      zoomin();
+      //zoomin();
     }
     else if ( ev->angleDelta().y() < 0 ) {
-      zoomout();
+      //zoomout();
     }
     ev->accept();
   }
@@ -3588,6 +3588,27 @@ void MainWindow::doWordsZoomBase()
   cfg.preferences.wordsZoomLevel = 0;
 
   applyWordsZoomLevel();
+}
+
+
+void MainWindow::darkThemeSwith()
+{
+  Config::Preferences p = cfg.preferences;
+  if ( p.darkMode == Config::Dark::On ) {
+    p.darkMode = Config::Dark::Off;
+  }
+  else if ( p.darkMode == Config::Dark::Off) {
+    p.darkMode = Config::Dark::On;
+  }
+  updateAppearances( p.addonStyle,
+                     p.displayStyle,
+                     p.darkMode
+#if !defined( Q_OS_WIN )
+                     ,
+                     p.interfaceStyle
+#endif
+  );
+
 }
 
 void MainWindow::applyWordsZoomLevel()
