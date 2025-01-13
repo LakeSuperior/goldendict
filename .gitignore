@@ -7,6 +7,8 @@ debug/
 build/
 release/
 tmp/
+out/
+vcpkg_installed/
 
 Makefile
 Makefile.Debug
@@ -41,6 +43,9 @@ GoldenDict.xcodeproj/
 /cmake-build-**/
 /build**/
 CMakeLists.txt.user
+CMakeFiles
+CMakeCache.txt
+_deps
 
 # kdevelop
 .kdev4/
