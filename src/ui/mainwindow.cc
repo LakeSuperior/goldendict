@@ -3591,7 +3591,7 @@ void MainWindow::doWordsZoomBase()
 }
 
 
-void MainWindow::darkThemeSwith()
+void MainWindow::darkThemeSwitch() 
 {
   Config::Preferences p = cfg.preferences;
   if ( p.darkMode == Config::Dark::On ) {

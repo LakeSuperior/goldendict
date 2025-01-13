@@ -337,6 +337,7 @@ private slots:
   void doWordsZoomIn();
   void doWordsZoomOut();
   void doWordsZoomBase();
+  void darkThemeSwitch();
 
   void applyWordsZoomLevel();
 
