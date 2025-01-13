@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.25) # Debian 11 Ubuntu 24.04 Fedora 36
 
+if (NEED_PROXY)
+    set(ENV{http_proxy} "http://127.0.0.1:7078")
+    set(ENV{https_proxy} "http://127.0.0.1:7078")
+elseif ()
+
 option(WITH_FFMPEG_PLAYER "Enable support for FFMPEG player" ON)
 option(WITH_EPWING_SUPPORT "Enable epwing support" ON)
 option(WITH_ZIM "enable zim support" ON)
