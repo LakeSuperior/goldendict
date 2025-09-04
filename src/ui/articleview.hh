@@ -17,6 +17,7 @@
 #include "article_inspect.hh"
 #include <QRegularExpression>
 #include "ankiconnector.hh"
+#include "eudicconnector.hh"
 #include "webmultimediadownload.hh"
 #include "base_type.hh"
 #include "articlewebview.hh"
@@ -42,6 +43,7 @@ class ArticleView: public QWidget
   ArticleViewAgent * agent;
 
   AnkiConnector * ankiConnector;
+  EudicConnector * eudicConnector;
 
   QAction pasteAction, articleUpAction, articleDownAction, goBackAction, goForwardAction, selectCurrentArticleAction,
     copyAsTextAction, inspectAction;
@@ -129,6 +131,8 @@ public:
                        unsigned group,
                        bool ignoreDiacritics );
   void showDefinition( QString const & word, QStringList const & dictIDs, unsigned group, bool ignoreDiacritics );
+
+  void sendToEudicNewWords( QString const & word );
 
   void sendToAnki( QString const & word, QString const & text, QString const & sentence );
   /// Clears the view and sets the application-global waiting cursor,

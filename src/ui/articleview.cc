@@ -236,6 +236,12 @@ ArticleView::ArticleView( QWidget * parent,
     emit statusBarMessage( errorText );
   } );
 
+  eudicConnector = new EudicConnector( this, cfg );
+  connect( eudicConnector, &EudicConnector::errorText, this, [ this ]( QString const & errorText ) {
+    emit statusBarMessage( errorText );
+  } );
+
+
   // Set up an Anki action if Anki integration is enabled in settings.
   if ( cfg.preferences.ankiConnectServer.enabled ) {
     sendToAnkiAction.setShortcut( QKeySequence( "Ctrl+Shift+N" ) );
@@ -347,6 +353,8 @@ void ArticleView::showDefinition( QString const & word,
   webview->setCursor( Qt::WaitCursor );
   load( req );
 
+  eudicConnector->sendToEudic( word, "", "" );
+
   // Update headwords history
   emit sendWordToHistory( word );
 }
@@ -409,6 +417,11 @@ void ArticleView::showDefinition( QString const & word,
                                   bool ignoreDiacritics )
 {
   showDefinition( word, dictIDs, {}, group, ignoreDiacritics );
+}
+
+void ArticleView::sendToEudicNewWords( QString const & word ) 
+{
+
 }
 
 void ArticleView::sendToAnki( QString const & word, QString const & dict_definition, QString const & sentence )
